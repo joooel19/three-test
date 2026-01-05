@@ -6,7 +6,7 @@ Run:
 
 ```bash
 npm install
-npm run dev
+npm start
 ```
 
 Open `http://localhost:5173`
