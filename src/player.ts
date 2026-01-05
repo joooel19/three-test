@@ -11,6 +11,8 @@ export type PlayerOptions = {
 export class Player {
   public controls: PointerLockControls;
   public object: THREE.Object3D;
+  public viewModel: THREE.Group;
+  private bobTime = 0;
   private velocity: THREE.Vector3;
   private direction: THREE.Vector3;
   private moveForward = false;
@@ -35,6 +37,20 @@ export class Player {
 
     this.controls = new PointerLockControls(camera, domElement);
     this.object = this.controls.object;
+
+    // Create a simple view-model (hands) and attach to the player/camera
+    this.viewModel = new THREE.Group();
+    const handGeom = new THREE.SphereGeometry(0.18, 16, 12);
+    const handMat = new THREE.MeshPhongMaterial({ color: '#ffdbac' });
+    const leftHand = new THREE.Mesh(handGeom, handMat);
+    const rightHand = new THREE.Mesh(handGeom, handMat);
+    leftHand.scale.set(1, 1.3, 0.85);
+    rightHand.scale.set(1, 1.3, 0.85);
+    leftHand.position.set(-1, -0.6, -0.6);
+    rightHand.position.set(1, -0.6, -0.6);
+    this.viewModel.add(leftHand, rightHand);
+    this.viewModel.position.set(0, -0.2, -0.5);
+    this.object.add(this.viewModel);
 
     this.velocity = new THREE.Vector3();
     this.direction = new THREE.Vector3();
@@ -144,6 +160,53 @@ export class Player {
       this.velocity.y = 0;
       this.object.position.y = this.height;
       this.canJump = true;
+    }
+
+    this.applyViewBobbing(delta);
+  }
+
+  applyViewBobbing(delta: number): void {
+    // Initialize base transforms if needed
+    if (!this.viewModel.userData.basePosition) {
+      this.viewModel.userData.basePosition = this.viewModel.position.clone();
+      this.viewModel.userData.baseRotation = this.viewModel.rotation.clone();
+    }
+
+    const basePos: THREE.Vector3 = this.viewModel.userData.basePosition;
+    const baseRot: THREE.Euler = this.viewModel.userData.baseRotation;
+
+    const isMoving =
+      this.moveForward || this.moveBackward || this.moveLeft || this.moveRight;
+
+    // Bobbing parameters
+    const walkFreq = 8;
+    const walkAmpY = 0.03;
+    const walkAmpX = 0.02;
+    const rotAmpZ = 0.03;
+
+    if (isMoving) {
+      this.bobTime += delta * walkFreq;
+      const bobY = Math.abs(Math.sin(this.bobTime)) * walkAmpY;
+      const bobX = Math.sin(this.bobTime * 2) * walkAmpX;
+      const rotZ = Math.sin(this.bobTime) * rotAmpZ;
+
+      this.viewModel.position.set(
+        basePos.x + bobX,
+        basePos.y - bobY,
+        basePos.z,
+      );
+      this.viewModel.rotation.set(baseRot.x, baseRot.y, baseRot.z + rotZ);
+    } else {
+      // Smoothly return to base pose when not moving
+      this.bobTime = 0;
+      this.viewModel.position.lerp(basePos, Math.min(1, delta * 10));
+      // Slerp-like for Euler: lerp each component.
+      this.viewModel.rotation.x +=
+        (baseRot.x - this.viewModel.rotation.x) * Math.min(1, delta * 10);
+      this.viewModel.rotation.y +=
+        (baseRot.y - this.viewModel.rotation.y) * Math.min(1, delta * 10);
+      this.viewModel.rotation.z +=
+        (baseRot.z - this.viewModel.rotation.z) * Math.min(1, delta * 10);
     }
   }
 }
