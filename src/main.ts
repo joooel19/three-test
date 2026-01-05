@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls';
+import Player from './player';
 
 const container = document.getElementById('app') as HTMLDivElement;
 
@@ -41,94 +41,22 @@ scene.add(directionalLight);
 const grid = new THREE.GridHelper(1000, 1000, '#888888', '#444444');
 scene.add(grid);
 
-// PointerLock controls and movement
-const controls = new PointerLockControls(camera, document.body);
-
+// Player (pointer-lock + movement)
 const blocker = document.getElementById('blocker') as HTMLDivElement | null;
 const instructions = document.getElementById(
   'instructions',
 ) as HTMLDivElement | null;
 
-if (instructions)
-  instructions.addEventListener('click', () => {
-    controls.lock();
-  });
-
-controls.addEventListener('lock', () => {
-  if (blocker) blocker.style.display = 'none';
+const player = new Player(camera, document.body, {
+  gravity: 9.81,
+  height: 1.8,
+  jumpVelocity: 2,
+  speed: 200,
 });
+player.enablePointerLockUI(blocker, instructions);
+scene.add(player.object);
 
-controls.addEventListener('unlock', () => {
-  if (blocker) blocker.style.display = 'flex';
-});
-
-const playerObject = controls.object as THREE.Object3D;
-scene.add(playerObject);
-
-const moveForward = { value: false };
-const moveBackward = { value: false };
-const moveLeft = { value: false };
-const moveRight = { value: false };
-let canJump = false;
-
-const velocity = new THREE.Vector3();
-const direction = new THREE.Vector3();
 const clock = new THREE.Clock();
-
-function onKeyDown(event: KeyboardEvent) {
-  switch (event.code) {
-    case 'ArrowUp':
-    case 'KeyW':
-      moveForward.value = true;
-      break;
-    case 'ArrowLeft':
-    case 'KeyA':
-      moveLeft.value = true;
-      break;
-    case 'ArrowDown':
-    case 'KeyS':
-      moveBackward.value = true;
-      break;
-    case 'ArrowRight':
-    case 'KeyD':
-      moveRight.value = true;
-      break;
-    case 'Space':
-      if (canJump) {
-        velocity.y += 10;
-        canJump = false;
-      }
-      break;
-    default:
-      break;
-  }
-}
-
-function onKeyUp(event: KeyboardEvent) {
-  switch (event.code) {
-    case 'ArrowUp':
-    case 'KeyW':
-      moveForward.value = false;
-      break;
-    case 'ArrowLeft':
-    case 'KeyA':
-      moveLeft.value = false;
-      break;
-    case 'ArrowDown':
-    case 'KeyS':
-      moveBackward.value = false;
-      break;
-    case 'ArrowRight':
-    case 'KeyD':
-      moveRight.value = false;
-      break;
-    default:
-      break;
-  }
-}
-
-document.addEventListener('keydown', onKeyDown);
-document.addEventListener('keyup', onKeyUp);
 
 function onWindowResize(): void {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -136,39 +64,10 @@ function onWindowResize(): void {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 window.addEventListener('resize', onWindowResize, false);
-
-function animate(): void {
-  requestAnimationFrame(animate);
+renderer.setAnimationLoop(() => {
+  const delta = clock.getDelta();
   cube.rotation.x += 0.01;
   cube.rotation.y += 0.013;
-  const delta = clock.getDelta();
-
-  // Update movement
-  velocity.x -= velocity.x * 10 * delta;
-  velocity.z -= velocity.z * 10 * delta;
-  // Simple gravity
-  velocity.y -= 9.8 * 10 * delta;
-
-  direction.z = Number(moveForward.value) - Number(moveBackward.value);
-  direction.x = Number(moveRight.value) - Number(moveLeft.value);
-  direction.normalize();
-
-  if (moveForward.value || moveBackward.value)
-    velocity.z -= direction.z * 400 * delta;
-  if (moveLeft.value || moveRight.value)
-    velocity.x -= direction.x * 400 * delta;
-
-  controls.moveRight(-velocity.x * delta);
-  controls.moveForward(-velocity.z * delta);
-
-  playerObject.position.y += velocity.y * delta;
-
-  if (playerObject.position.y < 1.6) {
-    velocity.y = 0;
-    playerObject.position.y = 1.6;
-    canJump = true;
-  }
-
+  player.update(delta);
   renderer.render(scene, camera);
-}
-animate();
+});
