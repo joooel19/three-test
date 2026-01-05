@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import Player from './player';
+import { Player } from './player';
+import { Sky } from 'three/examples/jsm/objects/Sky';
 
 const container = document.getElementById('app') as HTMLDivElement;
 
@@ -14,11 +15,15 @@ camera.position.set(0, 1.6, 3);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.5;
 container.append(renderer.domElement);
 
 const geometry = new THREE.BoxGeometry(1, 1, 1);
 const material = new THREE.MeshNormalMaterial();
 const cube = new THREE.Mesh(geometry, material);
+cube.position.set(0, 2, 0);
 scene.add(cube);
 
 // Ground plane
@@ -29,13 +34,47 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Lights
-const hemi = new THREE.HemisphereLight('#ffffff', '#444444', 1);
-hemi.position.set(0, 200, 0);
-scene.add(hemi);
-const directionalLight = new THREE.DirectionalLight('#ffffff', 0.8);
-directionalLight.position.set(5, 10, 7.5);
-scene.add(directionalLight);
+// Sky shader (from three.js example)
+const sky = new Sky();
+sky.scale.setScalar(450_000);
+scene.add(sky);
+
+const sun = new THREE.Vector3();
+
+const effectController = {
+  azimuth: 180,
+  elevation: 135,
+  mieCoefficient: 0.005,
+  mieDirectionalG: 0.7,
+  rayleigh: 3,
+  turbidity: 10,
+};
+
+const { uniforms } = sky.material;
+uniforms.turbidity.value = effectController.turbidity;
+uniforms.rayleigh.value = effectController.rayleigh;
+uniforms.mieCoefficient.value = effectController.mieCoefficient;
+uniforms.mieDirectionalG.value = effectController.mieDirectionalG;
+
+const phi = THREE.MathUtils.degToRad(90 - effectController.elevation);
+const theta = THREE.MathUtils.degToRad(effectController.azimuth);
+
+sun.setFromSphericalCoords(1, phi, theta);
+uniforms.sunPosition.value.copy(sun);
+
+// Ambient filling
+const ambient = new THREE.AmbientLight('#ffffff', 0.5);
+scene.add(ambient);
+
+// Directional "sun" light synced with Sky
+const sunLight = new THREE.DirectionalLight('#ffffff', 1);
+sunLight.position.copy(sun).multiplyScalar(450_000);
+sunLight.castShadow = true;
+scene.add(sunLight);
+scene.add(sunLight.target);
+
+// Let objects cast shadows from the sun
+cube.castShadow = true;
 
 // Grid helper
 const grid = new THREE.GridHelper(1000, 1000, '#888888', '#444444');

@@ -193,5 +193,3 @@ export class Player {
     }
   }
 }
-
-export default Player;
