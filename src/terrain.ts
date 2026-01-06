@@ -7,6 +7,7 @@ export class Terrain extends THREE.Group {
   private worldWidth = 200;
   private worldDepth = 200;
   private planeSize = 4096;
+  private chunkSize = 50;
   private heightScale = 36;
   private lacunarity = 2;
   private seed = 42;
@@ -22,48 +23,88 @@ export class Terrain extends THREE.Group {
   private detailAmplitude = 0.9;
   private flatThreshold = 0.35;
   private flatBlend = 0.12;
-  private heightData: Float32Array;
-  private terrainMesh: THREE.Mesh;
+  private chunks: Array<{
+    mesh: THREE.Mesh;
+    heightData: Float32Array;
+    width: number;
+    depth: number;
+    offsetX: number;
+    offsetZ: number;
+  }> = [];
+  private noiseRanges?: {
+    hillMin: number;
+    hillMax: number;
+    detailMin: number;
+    detailMax: number;
+  };
   private water: Water;
   private waterLevel = 16;
 
   constructor(skyController: SkyController) {
     super();
-
-    this.heightData = this.generateHeight(this.worldWidth, this.worldDepth);
-
-    const geometry = new THREE.PlaneGeometry(
-      this.planeSize,
-      this.planeSize,
-      this.worldWidth - 1,
-      this.worldDepth - 1,
+    this.noiseRanges = this.computeNoiseRanges(
+      this.worldWidth,
+      this.worldDepth,
     );
-    geometry.rotateX(-Math.PI / 2);
+    const cellSize = this.planeSize / (this.worldWidth - 1);
+    const chunksX = Math.ceil(this.worldWidth / this.chunkSize);
+    const chunksZ = Math.ceil(this.worldDepth / this.chunkSize);
 
-    const vertices = geometry.attributes.position.array as Float32Array;
-    const vertLength = vertices.length;
-    let sampleIndex = 0;
-    for (let vertIndex = 0; vertIndex < vertLength; vertIndex += 3) {
-      vertices[vertIndex + 1] = this.heightData[sampleIndex] * this.heightScale;
-      sampleIndex += 1;
+    const totalChunks = chunksX * chunksZ;
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+      const chunkX = chunkIndex % chunksX;
+      const chunkZ = Math.floor(chunkIndex / chunksX);
+      const offsetX = chunkX * this.chunkSize;
+      const offsetZ = chunkZ * this.chunkSize;
+      const cw = Math.min(this.chunkSize + 1, this.worldWidth - offsetX);
+      const cd = Math.min(this.chunkSize + 1, this.worldDepth - offsetZ);
+
+      const heightData = this.generateHeight(cw, cd, offsetX, offsetZ);
+
+      const chunkPlaneWidth = (cw - 1) * cellSize;
+      const chunkPlaneDepth = (cd - 1) * cellSize;
+
+      const geometry = new THREE.PlaneGeometry(
+        chunkPlaneWidth,
+        chunkPlaneDepth,
+        cw - 1,
+        cd - 1,
+      );
+      geometry.rotateX(-Math.PI / 2);
+
+      const vertices = geometry.attributes.position.array as Float32Array;
+      const vertLength = vertices.length;
+      let sampleIndex = 0;
+      for (let vertIndex = 0; vertIndex < vertLength; vertIndex += 3) {
+        vertices[vertIndex + 1] = heightData[sampleIndex] * this.heightScale;
+        sampleIndex += 1;
+      }
+
+      const texture = new THREE.CanvasTexture(
+        Terrain.generateTexture(heightData, cw, cd, this.textureScale),
+      );
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+
+      const material = new THREE.MeshPhongMaterial({ map: texture });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.receiveShadow = true;
+
+      const centerX = -this.planeSize / 2 + (offsetX + (cw - 1) / 2) * cellSize;
+      const centerZ = -this.planeSize / 2 + (offsetZ + (cd - 1) / 2) * cellSize;
+      mesh.position.set(centerX, 0, centerZ);
+
+      this.chunks.push({
+        depth: cd,
+        heightData,
+        mesh,
+        offsetX,
+        offsetZ,
+        width: cw,
+      });
+      this.add(mesh);
     }
-
-    const texture = new THREE.CanvasTexture(
-      Terrain.generateTexture(
-        this.heightData,
-        this.worldWidth,
-        this.worldDepth,
-        this.textureScale,
-      ),
-    );
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.colorSpace = THREE.SRGBColorSpace;
-
-    const material = new THREE.MeshPhongMaterial({ map: texture });
-    this.terrainMesh = new THREE.Mesh(geometry, material);
-    this.terrainMesh.receiveShadow = true;
-    this.add(this.terrainMesh);
 
     // Create water plane owned by the Terrain group
     const waterGeometry = new THREE.PlaneGeometry(
@@ -88,7 +129,7 @@ export class Terrain extends THREE.Group {
     });
     water.rotation.x = -Math.PI / 2;
     water.position.y = this.waterLevel;
-    water.material.uniforms.size.value = 11;
+    water.material.uniforms.size.value = 2;
     water.material.uniforms.sunDirection.value
       .copy(skyController.sun)
       .normalize();
@@ -96,7 +137,12 @@ export class Terrain extends THREE.Group {
     this.add(this.water);
   }
 
-  private generateHeight(width: number, depth: number) {
+  private generateHeight(
+    width: number,
+    depth: number,
+    offsetX = 0,
+    offsetZ = 0,
+  ) {
     const size = width * depth;
     const hill = new Float32Array(size);
     const detail = new Float32Array(size);
@@ -108,11 +154,23 @@ export class Terrain extends THREE.Group {
     let hillMax = -Infinity;
     let detailMin = Infinity;
     let detailMax = -Infinity;
+    if (this.noiseRanges) {
+      const {
+        hillMin: hMin,
+        hillMax: hMax,
+        detailMin: dMin,
+        detailMax: dMax,
+      } = this.noiseRanges;
+      hillMin = hMin;
+      hillMax = hMax;
+      detailMin = dMin;
+      detailMax = dMax;
+    }
 
     // Sample hill and detail noises into separate arrays
     for (let index = 0; index < size; index++) {
-      const x = index % width;
-      const y = Math.floor(index / width);
+      const x = offsetX + (index % width);
+      const y = offsetZ + Math.floor(index / width);
 
       let amp = 1;
       let freq = this.hillNoiseScale;
@@ -136,10 +194,12 @@ export class Terrain extends THREE.Group {
 
       hill[index] = hValue;
       detail[index] = dValue;
-      if (hValue < hillMin) hillMin = hValue;
-      if (hValue > hillMax) hillMax = hValue;
-      if (dValue < detailMin) detailMin = dValue;
-      if (dValue > detailMax) detailMax = dValue;
+      if (!this.noiseRanges) {
+        if (hValue < hillMin) hillMin = hValue;
+        if (hValue > hillMax) hillMax = hValue;
+        if (dValue < detailMin) detailMin = dValue;
+        if (dValue > detailMax) detailMax = dValue;
+      }
     }
 
     // Normalize both to 0..1
@@ -166,14 +226,72 @@ export class Terrain extends THREE.Group {
     return out;
   }
 
+  private sampleCellHeight(ix: number, iz: number) {
+    for (let chunkIndex = 0; chunkIndex < this.chunks.length; chunkIndex++) {
+      const chunkItem = this.chunks[chunkIndex];
+      if (
+        ix >= chunkItem.offsetX &&
+        ix < chunkItem.offsetX + chunkItem.width &&
+        iz >= chunkItem.offsetZ &&
+        iz < chunkItem.offsetZ + chunkItem.depth
+      ) {
+        const lx = ix - chunkItem.offsetX;
+        const lz = iz - chunkItem.offsetZ;
+        const index = lx + lz * chunkItem.width;
+        return chunkItem.heightData[index] || 0;
+      }
+    }
+    return 0;
+  }
+
+  private computeNoiseRanges(width: number, depth: number) {
+    const perlin = new ImprovedNoise();
+    const z = this.seed;
+    let hillMin = Infinity;
+    let hillMax = -Infinity;
+    let detailMin = Infinity;
+    let detailMax = -Infinity;
+    const size = width * depth;
+
+    for (let index = 0; index < size; index += 1) {
+      const x = index % width;
+      const y = Math.floor(index / width);
+
+      let amp = 1;
+      let freq = this.hillNoiseScale;
+      let hValue = 0;
+      for (let octave = 0; octave < this.hillOctaves; octave += 1) {
+        hValue += perlin.noise(x * freq, y * freq, z) * amp;
+        amp *= this.hillPersistence;
+        freq *= this.lacunarity;
+      }
+
+      amp = 1;
+      freq = this.detailNoiseScale;
+      let dValue = 0;
+      const dz = z + 512;
+      for (let octave = 0; octave < this.detailOctaves; octave += 1) {
+        dValue += perlin.noise(x * freq, y * freq, dz) * amp;
+        amp *= this.detailPersistence;
+        freq *= this.lacunarity;
+      }
+
+      if (hValue < hillMin) hillMin = hValue;
+      if (hValue > hillMax) hillMax = hValue;
+      if (dValue < detailMin) detailMin = dValue;
+      if (dValue > detailMax) detailMax = dValue;
+    }
+
+    return { detailMax, detailMin, hillMax, hillMin };
+  }
+
   private static generateTexture(
     data: Float32Array,
     width: number,
     height: number,
     textureScale: number,
   ) {
-    const vector3 = new THREE.Vector3(0, 0, 0);
-    const sun = new THREE.Vector3(1, 1, 1).normalize();
+    // Color will be computed solely from height to avoid per-chunk lighting differences
 
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -197,18 +315,11 @@ export class Terrain extends THREE.Group {
     for (
       let byte = 0, pixIndex = 0;
       byte < imageLength;
-      byte += 4, pixIndex++
+      byte += 4, pixIndex += 1
     ) {
-      vector3.x = (data[pixIndex - 2] || 0) - (data[pixIndex + 2] || 0);
-      vector3.y = 2;
-      vector3.z =
-        (data[pixIndex - width * 2] || 0) - (data[pixIndex + width * 2] || 0);
-      vector3.normalize();
-
-      const shade = vector3.dot(sun);
       const heightValue = Math.max(0, Math.min(1, data[pixIndex] || 0));
 
-      // Blend between low->mid->high based on height
+      // Blend between low->mid->high based on height only
       let baseB: number, baseG: number, baseR: number;
       if (heightValue < 0.5) {
         const weight = heightValue * 2;
@@ -222,24 +333,12 @@ export class Terrain extends THREE.Group {
         baseB = Terrain.lerpNumbers(midColor[2], highColor[2], weight);
       }
 
-      // Lighting factor from slope-based shade
-      const lightFactor = Math.max(0.45, 0.7 + shade * 0.45);
+      // Simple height-based brightness to avoid slope-dependent differences
+      const lightFactor = 0.85 + heightValue * 0.15;
 
-      // Small per-pixel variation to simulate grass patches
-      const variation = (Math.random() - 0.5) * 18;
-
-      imageData[byte] = Math.min(
-        255,
-        Math.max(0, baseR * lightFactor + variation),
-      );
-      imageData[byte + 1] = Math.min(
-        255,
-        Math.max(0, baseG * lightFactor + variation),
-      );
-      imageData[byte + 2] = Math.min(
-        255,
-        Math.max(0, baseB * lightFactor + variation),
-      );
+      imageData[byte] = Math.min(255, Math.max(0, baseR * lightFactor));
+      imageData[byte + 1] = Math.min(255, Math.max(0, baseG * lightFactor));
+      imageData[byte + 2] = Math.min(255, Math.max(0, baseB * lightFactor));
     }
 
     context.putImageData(image, 0, 0);
@@ -303,15 +402,10 @@ export class Terrain extends THREE.Group {
     const ix2 = clamp(ix + 1, this.worldWidth - 1);
     const iz2 = clamp(iz + 1, this.worldDepth - 1);
 
-    const index11 = ix1 + iz1 * this.worldWidth;
-    const index21 = ix2 + iz1 * this.worldWidth;
-    const index12 = ix1 + iz2 * this.worldWidth;
-    const index22 = ix2 + iz2 * this.worldWidth;
-
-    const h11 = (this.heightData[index11] || 0) * this.heightScale;
-    const h21 = (this.heightData[index21] || 0) * this.heightScale;
-    const h12 = (this.heightData[index12] || 0) * this.heightScale;
-    const h22 = (this.heightData[index22] || 0) * this.heightScale;
+    const h11 = this.sampleCellHeight(ix1, iz1) * this.heightScale;
+    const h21 = this.sampleCellHeight(ix2, iz1) * this.heightScale;
+    const h12 = this.sampleCellHeight(ix1, iz2) * this.heightScale;
+    const h22 = this.sampleCellHeight(ix2, iz2) * this.heightScale;
 
     const h1 = h11 * (1 - tx) + h21 * tx;
     const h2 = h12 * (1 - tx) + h22 * tx;
