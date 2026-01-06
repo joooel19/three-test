@@ -28,3 +28,6 @@ Keep guidance short and code-focused — follow these concrete patterns when mak
 - Never create `*.d.ts` files without asking the user for permission.
 - Always check linter errors with `npm run lint`.
 - Keep comments to a minimum.
+- Never allow default parameters.
+- Always require all object keys.
+- Never use default exports.

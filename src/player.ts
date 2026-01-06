@@ -9,9 +9,9 @@ export type PlayerOptions = {
 };
 
 export class Player {
-  public controls: PointerLockControls;
   public object: THREE.Object3D;
-  public viewModel: THREE.Group;
+  private controls: PointerLockControls;
+  private viewModel: THREE.Group;
   private bobTime = 0;
   private baseViewPos: THREE.Vector3;
   private baseViewRot: THREE.Euler;
@@ -22,10 +22,10 @@ export class Player {
   private moveLeft = false;
   private moveRight = false;
   private canJump = false;
-  public readonly speed: number;
-  public readonly gravity: number;
-  public readonly jumpVelocity: number;
-  public readonly height: number;
+  private readonly speed: number;
+  private readonly gravity: number;
+  private readonly jumpVelocity: number;
+  private readonly height: number;
   private readonly bobFreq = 8;
   private readonly bobAmpY = 0.03;
   private readonly bobAmpX = 0.02;
