@@ -364,10 +364,15 @@ void main(){
     const worldPos = new THREE.Vector3();
     this.mesh.getWorldPosition(worldPos);
     const distance = worldPos.distanceTo(cameraPos);
-    let density = 1;
-    if (distance > 350) density = 0;
-    else if (distance > 200) density = 0.15;
-    else if (distance > 80) density = 0.5;
+    let density: number;
+    // Tunable bands (from near -> far). These provide smoother falloff
+    if (distance <= 80) density = 1;
+    else if (distance <= 160) density = 0.8;
+    else if (distance <= 240) density = 0.6;
+    else if (distance <= 320) density = 0.4;
+    else if (distance <= 400) density = 0.2;
+    else if (distance <= 480) density = 0;
+    else density = 0;
     const total =
       (this.geometry.attributes.index as THREE.BufferAttribute).count || 0;
     const desired = Math.max(0, Math.floor(total * density));
