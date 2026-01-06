@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CloudVolume } from './cloud';
+import { GrassChunk } from './grass-chunk';
 import { SkyController } from './sky';
 import { Water } from 'three/examples/jsm/objects/Water';
 
@@ -12,6 +13,7 @@ export interface ChunkEntry {
   offsetZ: number;
   water: Water;
   clouds: CloudVolume[];
+  grass: GrassChunk;
 }
 
 export class TerrainChunk {
@@ -23,6 +25,7 @@ export class TerrainChunk {
   public offsetZ: number;
   public water: Water;
   public clouds: CloudVolume[];
+  public grass: GrassChunk;
 
   constructor(entry: ChunkEntry) {
     this.mesh = entry.mesh;
@@ -33,11 +36,13 @@ export class TerrainChunk {
     this.offsetZ = entry.offsetZ;
     this.water = entry.water;
     this.clouds = entry.clouds;
+    this.grass = entry.grass;
   }
 
   addTo(parent: THREE.Group) {
     parent.add(this.water);
     parent.add(...this.clouds);
+    parent.add(this.grass.mesh);
     parent.add(this.mesh);
   }
 
@@ -57,6 +62,7 @@ export class TerrainChunk {
     uniforms.time.value += delta;
     uniforms.sunDirection.value.copy(skyController.sun).normalize();
     for (const cloud of this.clouds) cloud.update(camera);
+    this.grass.update(delta, camera.position);
   }
 
   dispose(parent: THREE.Group) {
@@ -64,6 +70,7 @@ export class TerrainChunk {
     parent.remove(this.water);
     this.water.geometry.dispose();
     this.water.material.dispose();
+    this.grass.dispose(parent);
     for (const cloud of this.clouds) {
       parent.remove(cloud);
       cloud.geometry.dispose();

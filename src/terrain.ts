@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { ChunkEntry, TerrainChunk } from './terrain-chunk';
 import { CloudVolume } from './cloud';
+import { GrassChunk } from './grass-chunk';
 import { NoiseGenerator } from './noise';
 import { SkyController } from './sky';
 import { WaterFactory } from './water-factory';
 
 export class Terrain extends THREE.Group {
-  private chunkSize = 64;
+  private chunkSize = 16;
   private heightScale = 36;
   private lacunarity = 2;
   private seed = 42;
@@ -232,11 +233,50 @@ export class Terrain extends THREE.Group {
           ),
         ),
     );
+    const sampleFromHeightData = (x: number, z: number) => {
+      // Map world coords to chunk-local sample grid (floating)
+      const fx = x / this.cellSize;
+      const fz = z / this.cellSize;
+      const ix = Math.floor(fx);
+      const iz = Math.floor(fz);
+      const tx = fx - ix;
+      const tz = fz - iz;
+
+      const lx = ix - offsetX;
+      const lz = iz - offsetZ;
+      // If any of the four surrounding samples are outside the chunk, return 0
+      if (lx < 0 || lz < 0 || lx + 1 >= cw || lz + 1 >= cd) return 0;
+
+      const index11 = lx + lz * cw;
+      const index21 = lx + 1 + lz * cw;
+      const index12 = lx + (lz + 1) * cw;
+      const index22 = lx + 1 + (lz + 1) * cw;
+
+      const h11 = heightData[index11] || 0;
+      const h21 = heightData[index21] || 0;
+      const h12 = heightData[index12] || 0;
+      const h22 = heightData[index22] || 0;
+
+      const h1 = h11 * (1 - tx) + h21 * tx;
+      const h2 = h12 * (1 - tx) + h22 * tx;
+      return (h1 * (1 - tz) + h2 * tz) * this.heightScale;
+    };
+
+    const grass = new GrassChunk({
+      bladeCount: 100_000,
+      centerX,
+      centerZ,
+      depth: chunkPlaneDepth,
+      sampleHeight: sampleFromHeightData,
+      waterLevel: this.waterLevel,
+      width: chunkPlaneWidth,
+    });
 
     const key = Terrain.makeKey(cx, cz);
     const entry: ChunkEntry = {
       clouds,
       depth: cd,
+      grass,
       heightData,
       mesh,
       offsetX,
