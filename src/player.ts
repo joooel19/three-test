@@ -43,8 +43,8 @@ export class Player {
   ) {
     this.speed = options.speed;
     this.gravity = options.gravity * 10;
-    this.jumpVelocity = options.jumpVelocity * 10;
-    this.height = options.height;
+    this.jumpVelocity = options.jumpVelocity * 20;
+    this.height = options.height * 10;
     this.groundFn = options.ground;
 
     this.controls = new PointerLockControls(camera, domElement);

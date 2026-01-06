@@ -1,17 +1,14 @@
 import * as THREE from 'three';
 import { ChunkEntry, TerrainChunk } from './terrain-chunk';
-import { CloudVolume } from './cloud';
 import { GrassChunk } from './grass-chunk';
 import { NoiseGenerator } from './noise';
 import { SkyController } from './sky';
-import { WaterFactory } from './water-factory';
 
 export class Terrain extends THREE.Group {
-  private chunkSize = 16;
+  private chunkSize = 8;
   private heightScale = 36;
   private lacunarity = 2;
   private seed = 42;
-  private textureScale = 4;
   private elevationExponent = 1.6;
   private hillNoiseScale = 0.008;
   private detailNoiseScale = 0.06;
@@ -34,9 +31,7 @@ export class Terrain extends THREE.Group {
     detailMax: number;
   };
   private noiseGenerator: NoiseGenerator;
-  private waterNormals: THREE.Texture;
   private waterLevel = 16;
-  private waterFactory: WaterFactory;
   private skyController: SkyController;
 
   constructor(skyController: SkyController) {
@@ -48,19 +43,10 @@ export class Terrain extends THREE.Group {
       this.chunkSize * sampleChunks,
       this.chunkSize * sampleChunks,
     );
-    // Load shared water normals texture once for all chunk waters
-    this.waterNormals = new THREE.TextureLoader().load(
-      new URL('textures/waternormals.jpg', import.meta.url).href,
-      (waterTexture) => {
-        waterTexture.wrapS = THREE.RepeatWrapping;
-        waterTexture.wrapT = THREE.RepeatWrapping;
-      },
-    );
-
-    this.waterFactory = new WaterFactory(this.waterNormals, this.skyController);
+    // Water is now managed centrally by SkyController.
 
     // Load an initial area around origin (player at 0,0)
-    this.updateChunks(0, 0, 1);
+    this.updateChunks(0, 0, 2);
     // With the new mapping, cell (0,0) sits at world position (0,0).
     const gx0 = 0 / this.cellSize;
     const gz0 = 0 / this.cellSize;
@@ -190,49 +176,16 @@ export class Terrain extends THREE.Group {
       | undefined;
     if (normalAttribute) normalAttribute.needsUpdate = true;
 
-    const texture = new THREE.CanvasTexture(
-      Terrain.generateTexture(heightData, cw, cd, this.textureScale),
-    );
-    texture.wrapS = THREE.ClampToEdgeWrapping;
-    texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.colorSpace = THREE.SRGBColorSpace;
-
-    const material = new THREE.MeshPhongMaterial({ map: texture });
+    const material = new THREE.MeshPhongMaterial({
+      color: new THREE.Color('#1ab005'),
+    });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.receiveShadow = true;
 
     const centerX = (offsetX + (cw - 1) / 2) * this.cellSize;
     const centerZ = (offsetZ + (cd - 1) / 2) * this.cellSize;
     mesh.position.set(centerX, 0, centerZ);
-    // Create a water plane for this chunk
-    const water = this.waterFactory.create(
-      chunkPlaneWidth,
-      chunkPlaneDepth,
-      centerX,
-      centerZ,
-      this.waterLevel,
-    );
-    water.rotation.x = -Math.PI / 2;
-    // Position water at same horizontal center as chunk, and at configured level
-    water.position.set(centerX, this.waterLevel, centerZ);
-    water.material.uniforms.size.value = 2;
-    water.material.uniforms.sunDirection.value
-      .copy(this.skyController.sun)
-      .normalize();
+    // Water is managed globally by SkyController; chunks don't create water.
 
-    const rand = (min: number, max: number) =>
-      Math.random() * (max - min) + min;
-    const clouds = Array.from(
-      { length: 2 },
-      () =>
-        new CloudVolume(
-          new THREE.Vector3(
-            centerX + rand(-chunkPlaneWidth * 0.25, chunkPlaneWidth * 0.25),
-            rand(320, 460),
-            centerZ + rand(-chunkPlaneDepth * 0.25, chunkPlaneDepth * 0.25),
-          ),
-        ),
-    );
     const sampleFromHeightData = (x: number, z: number) => {
       // Map world coords to chunk-local sample grid (floating)
       const fx = x / this.cellSize;
@@ -266,7 +219,6 @@ export class Terrain extends THREE.Group {
       bladeCount: 100_000,
       centerX,
       centerZ,
-      depth: chunkPlaneDepth,
       sampleHeight: sampleFromHeightData,
       waterLevel: this.waterLevel,
       width: chunkPlaneWidth,
@@ -274,14 +226,12 @@ export class Terrain extends THREE.Group {
 
     const key = Terrain.makeKey(cx, cz);
     const entry: ChunkEntry = {
-      clouds,
       depth: cd,
       grass,
       heightData,
       mesh,
       offsetX,
       offsetZ,
-      water,
       width: cw,
     };
     const chunk = new TerrainChunk(entry);
@@ -297,7 +247,7 @@ export class Terrain extends THREE.Group {
     this.chunks.delete(key);
   }
 
-  public updateChunks(playerX: number, playerZ: number, radius = 1) {
+  public updateChunks(playerX: number, playerZ: number, radius: number) {
     // Map world coordinates to grid cell coordinates (cell size units)
     const gx = playerX / this.cellSize;
     const gz = playerZ / this.cellSize;
@@ -332,7 +282,7 @@ export class Terrain extends THREE.Group {
     if (this.lastChunkX !== cx || this.lastChunkZ !== cz) {
       this.lastChunkX = cx;
       this.lastChunkZ = cz;
-      this.updateChunks(position.x, position.z, 1);
+      this.updateChunks(position.x, position.z, 2);
     }
   }
 
@@ -376,95 +326,12 @@ export class Terrain extends THREE.Group {
     return { detailMax, detailMin, hillMax, hillMin };
   }
 
-  private static generateTexture(
-    data: Float32Array,
-    width: number,
-    height: number,
-    textureScale: number,
-  ) {
-    // Color will be computed solely from height to avoid per-chunk lighting differences
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) return canvas;
-
-    context.fillStyle = '#000';
-    context.fillRect(0, 0, width, height);
-
-    const image = context.getImageData(0, 0, canvas.width, canvas.height);
-    const imageData = image.data;
-
-    const imageLength = imageData.length;
-    // Define grass color stops: low (dirt), mid (dark green), high (light green)
-    const lowColor = [80, 58, 22];
-    const midColor = [48, 115, 35];
-    const highColor = [160, 200, 120];
-    // Use Terrain.lerpNumbers helper below
-
-    for (
-      let byte = 0, pixIndex = 0;
-      byte < imageLength;
-      byte += 4, pixIndex += 1
-    ) {
-      const heightValue = Math.max(0, Math.min(1, data[pixIndex] || 0));
-
-      // Blend between low->mid->high based on height only
-      let baseB: number, baseG: number, baseR: number;
-      if (heightValue < 0.5) {
-        const weight = heightValue * 2;
-        baseR = Terrain.lerpNumbers(lowColor[0], midColor[0], weight);
-        baseG = Terrain.lerpNumbers(lowColor[1], midColor[1], weight);
-        baseB = Terrain.lerpNumbers(lowColor[2], midColor[2], weight);
-      } else {
-        const weight = (heightValue - 0.5) * 2;
-        baseR = Terrain.lerpNumbers(midColor[0], highColor[0], weight);
-        baseG = Terrain.lerpNumbers(midColor[1], highColor[1], weight);
-        baseB = Terrain.lerpNumbers(midColor[2], highColor[2], weight);
-      }
-
-      // Simple height-based brightness to avoid slope-dependent differences
-      const lightFactor = 0.85 + heightValue * 0.15;
-
-      imageData[byte] = Math.min(255, Math.max(0, baseR * lightFactor));
-      imageData[byte + 1] = Math.min(255, Math.max(0, baseG * lightFactor));
-      imageData[byte + 2] = Math.min(255, Math.max(0, baseB * lightFactor));
-    }
-
-    context.putImageData(image, 0, 0);
-
-    const canvasScaled = document.createElement('canvas');
-    canvasScaled.width = Math.max(1, width * textureScale);
-    canvasScaled.height = Math.max(1, height * textureScale);
-    const contextScaled = canvasScaled.getContext('2d');
-    if (!contextScaled) return canvasScaled;
-    contextScaled.imageSmoothingEnabled = true;
-    contextScaled.drawImage(
-      canvas,
-      0,
-      0,
-      canvasScaled.width,
-      canvasScaled.height,
-    );
-
-    return canvasScaled;
-  }
-
   private static smoothStep(value: number, edgeLo: number, edgeHi: number) {
     const tval = Math.max(
       0,
       Math.min(1, (value - edgeLo) / (edgeHi - edgeLo || 1)),
     );
     return tval * tval * (3 - 2 * tval);
-  }
-
-  private static lerpNumbers(
-    fromValue: number,
-    toValue: number,
-    weight: number,
-  ) {
-    return fromValue + (toValue - fromValue) * weight;
   }
 
   public getHeightAt(x: number, z: number) {

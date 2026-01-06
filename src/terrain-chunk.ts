@@ -1,8 +1,6 @@
 import * as THREE from 'three';
-import { CloudVolume } from './cloud';
 import { GrassChunk } from './grass-chunk';
 import { SkyController } from './sky';
-import { Water } from 'three/examples/jsm/objects/Water';
 
 export interface ChunkEntry {
   mesh: THREE.Mesh;
@@ -11,8 +9,6 @@ export interface ChunkEntry {
   depth: number;
   offsetX: number;
   offsetZ: number;
-  water: Water;
-  clouds: CloudVolume[];
   grass: GrassChunk;
 }
 
@@ -23,8 +19,6 @@ export class TerrainChunk {
   public depth: number;
   public offsetX: number;
   public offsetZ: number;
-  public water: Water;
-  public clouds: CloudVolume[];
   public grass: GrassChunk;
 
   constructor(entry: ChunkEntry) {
@@ -34,14 +28,10 @@ export class TerrainChunk {
     this.depth = entry.depth;
     this.offsetX = entry.offsetX;
     this.offsetZ = entry.offsetZ;
-    this.water = entry.water;
-    this.clouds = entry.clouds;
     this.grass = entry.grass;
   }
 
   addTo(parent: THREE.Group) {
-    parent.add(this.water);
-    parent.add(...this.clouds);
     parent.add(this.grass.mesh);
     parent.add(this.mesh);
   }
@@ -55,37 +45,16 @@ export class TerrainChunk {
   }
 
   update(camera: THREE.Camera, delta: number, skyController: SkyController) {
-    const uniforms = this.water.material.uniforms as {
-      time: THREE.IUniform<number>;
-      sunDirection: THREE.IUniform<THREE.Vector3>;
-    };
-    uniforms.time.value += delta;
-    uniforms.sunDirection.value.copy(skyController.sun).normalize();
-    for (const cloud of this.clouds) cloud.update(camera);
-    this.grass.update(delta, camera.position);
+    // Update grass and other per-chunk items. Water is managed globally by SkyController.
+    // Use camera world position for LOD checks — camera.position may be local.
+    const camPos = new THREE.Vector3();
+    camera.getWorldPosition(camPos);
+    this.grass.update(delta, camPos, skyController);
   }
 
   dispose(parent: THREE.Group) {
     parent.remove(this.mesh);
-    parent.remove(this.water);
-    this.water.geometry.dispose();
-    this.water.material.dispose();
     this.grass.dispose(parent);
-    for (const cloud of this.clouds) {
-      parent.remove(cloud);
-      cloud.geometry.dispose();
-
-      const mat = cloud.material as THREE.RawShaderMaterial | undefined;
-      if (!mat) continue;
-
-      const mapValue = (
-        mat.uniforms as { map?: { value?: { dispose?: () => void } } }
-      ).map?.value;
-      if (mapValue && typeof mapValue.dispose === 'function')
-        mapValue.dispose();
-
-      mat.dispose();
-    }
 
     const geom = this.mesh.geometry;
     const mat = this.mesh.material;

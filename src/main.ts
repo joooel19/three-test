@@ -19,7 +19,6 @@ const camera = new THREE.PerspectiveCamera(
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.5;
 container.append(renderer.domElement);
@@ -58,7 +57,7 @@ function onWindowResize(): void {
 window.addEventListener('resize', onWindowResize, false);
 renderer.setAnimationLoop(() => {
   const delta = clock.getDelta();
-  skyController.update(camera);
+  skyController.update(camera, delta);
   player.update(delta);
   terrain.updatePlayerPosition(player.object.position);
   terrain.update(camera, delta);

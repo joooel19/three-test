@@ -1,9 +1,11 @@
+import * as Cloud from './cloud';
 import * as THREE from 'three';
 import {
   Lensflare,
   LensflareElement,
 } from 'three/examples/jsm/objects/Lensflare';
 import { Sky } from 'three/examples/jsm/objects/Sky';
+import { Water } from 'three/examples/jsm/objects/Water';
 
 export class SkyController extends THREE.Group {
   public sun: THREE.Vector3;
@@ -11,10 +13,18 @@ export class SkyController extends THREE.Group {
   private sunLight: THREE.DirectionalLight;
   private ambient: THREE.AmbientLight;
   private lensflareLight: THREE.PointLight;
+  private clouds: Cloud.CloudVolume[] = [];
+  private cloudOffsets: THREE.Vector3[] = [];
+  private water: Water;
+  private waterLevel = 16;
 
   private readonly azimuth: number = 180;
   private readonly elevation: number = 140;
   private readonly color: string = '#ffffff';
+
+  private static rand(min: number, max: number) {
+    return Math.random() * (max - min) + min;
+  }
 
   constructor() {
     super();
@@ -99,10 +109,47 @@ export class SkyController extends THREE.Group {
     lensflare.addElement(new LensflareElement(tex3, 220, 0.85));
     lensflare.addElement(new LensflareElement(tex3, 130, 1));
     point.add(lensflare);
+    // Create volumetric clouds and keep offsets so they can follow the player.
+    const cloudCount = 12;
+    for (let index = 0; index < cloudCount; index += 1) {
+      const ox = SkyController.rand(-2000, 2000);
+      const oz = SkyController.rand(-2000, 2000);
+      const oy = SkyController.rand(320, 460);
+      const cloud = new Cloud.CloudVolume(new THREE.Vector3(ox, oy, oz));
+      this.clouds.push(cloud);
+      this.cloudOffsets.push(new THREE.Vector3(ox, oy, oz));
+      this.add(cloud);
+    }
+
+    // Create a single, large water plane that follows the player.
+    const loader = new THREE.TextureLoader();
+    const waterNormals = loader.load(
+      new URL('textures/waternormals.jpg', import.meta.url).href,
+    );
+    waterNormals.wrapS = THREE.RepeatWrapping;
+    waterNormals.wrapT = THREE.RepeatWrapping;
+
+    const waterGeom = new THREE.PlaneGeometry(200_000, 200_000);
+    const water = new Water(waterGeom, {
+      distortionScale: 3.7,
+      fog: false,
+      sunColor: new THREE.Color('white'),
+      sunDirection: new THREE.Vector3(),
+      textureHeight: 512,
+      textureWidth: 512,
+      waterColor: new THREE.Color('#001e0f'),
+      waterNormals,
+    });
+    water.rotation.x = -Math.PI / 2;
+    water.position.set(0, this.waterLevel, 0);
+    water.material.uniforms.size.value = 2;
+    water.material.uniforms.sunDirection.value.copy(this.sun).normalize();
+    this.water = water;
+    this.add(water);
   }
 
   // Call this every frame to update visibility/intensity based on camera view
-  public update(camera: THREE.Camera): void {
+  public update(camera: THREE.Camera, delta: number): void {
     // Lens flare
     const camDirection = new THREE.Vector3();
     camera.getWorldDirection(camDirection).normalize();
@@ -124,5 +171,22 @@ export class SkyController extends THREE.Group {
       visibilityFactor ** 0.75,
     );
     this.lensflareLight.visible = visibilityFactor > 0.001;
+    // Position clouds relative to player so they effectively follow movement.
+    const playerPos = new THREE.Vector3();
+    camera.getWorldPosition(playerPos);
+    for (let index = 0; index < this.clouds.length; index += 1) {
+      const off = this.cloudOffsets[index];
+      const cloud = this.clouds[index];
+      cloud.position.set(playerPos.x + off.x, off.y, playerPos.z + off.z);
+      cloud.update(camera);
+    }
+
+    this.water.position.set(playerPos.x, this.waterLevel, playerPos.z);
+    const uniforms = this.water.material.uniforms as {
+      time: THREE.IUniform<number>;
+      sunDirection: THREE.IUniform<THREE.Vector3>;
+    };
+    uniforms.time.value += delta;
+    uniforms.sunDirection.value.copy(this.sun).normalize();
   }
 }
