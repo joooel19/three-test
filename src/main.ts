@@ -10,8 +10,7 @@ const stats = new Stats();
 container.append(stats.dom);
 
 const scene = new THREE.Scene();
-// Add a linear fog around the camera (near..far in world units)
-scene.fog = new THREE.Fog(new THREE.Color('#7fb7d9'), 80, 480);
+scene.fog = new THREE.FogExp2('#e0e0e0', 0.0025);
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
@@ -32,12 +31,6 @@ scene.add(skyController);
 // Terrain
 const terrain = new Terrain(skyController);
 scene.add(terrain);
-
-// Propagate fog settings to the skyController so chunk shaders can read them
-const { fog } = scene;
-skyController.fogColor = fog.color.clone();
-skyController.fogNear = fog.near;
-skyController.fogFar = fog.far;
 
 // Player (pointer-lock + movement)
 const blocker = document.getElementById('blocker');

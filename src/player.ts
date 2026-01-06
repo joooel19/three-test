@@ -118,7 +118,8 @@ export class Player {
       case 'Space':
         if (down && this.canJump) {
           this.velocity.y +=
-            this.jumpVelocity * (this.isSprinting ? this.sprintMultiplier : 1);
+            this.jumpVelocity *
+            (this.isSprinting ? this.sprintMultiplier / 2 : 1);
           this.canJump = false;
         }
         break;
