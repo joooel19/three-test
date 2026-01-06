@@ -135,8 +135,8 @@ export class SkyController extends THREE.Group {
       fog: false,
       sunColor: new THREE.Color('white'),
       sunDirection: new THREE.Vector3(),
-      textureHeight: 512,
-      textureWidth: 512,
+      textureHeight: 256,
+      textureWidth: 256,
       waterColor: new THREE.Color('#001e0f'),
       waterNormals,
     });

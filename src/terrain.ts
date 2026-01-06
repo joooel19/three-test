@@ -31,6 +31,7 @@ export class Terrain extends THREE.Group {
     detailMax: number;
   };
   private noiseGenerator: NoiseGenerator;
+  private chunkRadius = 3;
   private waterLevel = 16;
   private skyController: SkyController;
 
@@ -43,10 +44,9 @@ export class Terrain extends THREE.Group {
       this.chunkSize * sampleChunks,
       this.chunkSize * sampleChunks,
     );
-    // Water is now managed centrally by SkyController.
 
     // Load an initial area around origin (player at 0,0)
-    this.updateChunks(0, 0, 2);
+    this.updateChunks(0, 0);
     // With the new mapping, cell (0,0) sits at world position (0,0).
     const gx0 = 0 / this.cellSize;
     const gz0 = 0 / this.cellSize;
@@ -184,7 +184,6 @@ export class Terrain extends THREE.Group {
     const centerX = (offsetX + (cw - 1) / 2) * this.cellSize;
     const centerZ = (offsetZ + (cd - 1) / 2) * this.cellSize;
     mesh.position.set(centerX, 0, centerZ);
-    // Water is managed globally by SkyController; chunks don't create water.
 
     const sampleFromHeightData = (x: number, z: number) => {
       // Map world coords to chunk-local sample grid (floating)
@@ -247,7 +246,7 @@ export class Terrain extends THREE.Group {
     this.chunks.delete(key);
   }
 
-  public updateChunks(playerX: number, playerZ: number, radius: number) {
+  public updateChunks(playerX: number, playerZ: number) {
     // Map world coordinates to grid cell coordinates (cell size units)
     const gx = playerX / this.cellSize;
     const gz = playerZ / this.cellSize;
@@ -255,11 +254,11 @@ export class Terrain extends THREE.Group {
     const centerCZ = Math.floor(gz / this.chunkSize);
 
     const wanted = new Set<string>();
-    const side = radius * 2 + 1;
+    const side = this.chunkRadius * 2 + 1;
     const total = side * side;
     for (let index = 0; index < total; index += 1) {
-      const dx = (index % side) - radius;
-      const dz = Math.floor(index / side) - radius;
+      const dx = (index % side) - this.chunkRadius;
+      const dz = Math.floor(index / side) - this.chunkRadius;
       const cx = centerCX + dx;
       const cz = centerCZ + dz;
       const key = Terrain.makeKey(cx, cz);
@@ -282,7 +281,7 @@ export class Terrain extends THREE.Group {
     if (this.lastChunkX !== cx || this.lastChunkZ !== cz) {
       this.lastChunkX = cx;
       this.lastChunkZ = cz;
-      this.updateChunks(position.x, position.z, 2);
+      this.updateChunks(position.x, position.z);
     }
   }
 
