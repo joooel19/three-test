@@ -34,6 +34,7 @@ export class Player {
   private readonly bobAmpY = 0.03;
   private readonly bobAmpX = 0.02;
   private readonly bobRotZ = 0.03;
+  private readonly minLevel = 16;
 
   constructor(
     camera: THREE.Camera,
@@ -163,9 +164,9 @@ export class Player {
     // Apply vertical motion
     this.object.position.y += this.velocity.y * delta;
 
-    const groundY = this.groundFn(
-      this.object.position.x,
-      this.object.position.z,
+    const groundY = Math.max(
+      this.minLevel,
+      this.groundFn(this.object.position.x, this.object.position.z),
     );
 
     if (this.object.position.y < groundY + this.height) {

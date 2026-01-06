@@ -1,13 +1,20 @@
 import * as THREE from 'three';
-import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
+import { NoiseGenerator } from './noise';
 import { SkyController } from './sky';
 import { Water } from 'three/examples/jsm/objects/Water';
 
+interface ChunkEntry {
+  mesh: THREE.Mesh;
+  heightData: Float32Array;
+  width: number;
+  depth: number;
+  offsetX: number;
+  offsetZ: number;
+  water?: Water;
+}
+
 export class Terrain extends THREE.Group {
-  private worldWidth = 200;
-  private worldDepth = 200;
-  private planeSize = 4096;
-  private chunkSize = 50;
+  private chunkSize = 64;
   private heightScale = 36;
   private lacunarity = 2;
   private seed = 42;
@@ -23,74 +30,47 @@ export class Terrain extends THREE.Group {
   private detailAmplitude = 0.9;
   private flatThreshold = 0.35;
   private flatBlend = 0.12;
-  private cellSize = 0;
+  private cellSize = 4096 / (200 - 1);
   private lastChunkX?: number;
   private lastChunkZ?: number;
-  private chunks: Map<
-    string,
-    {
-      mesh: THREE.Mesh;
-      heightData: Float32Array;
-      width: number;
-      depth: number;
-      offsetX: number;
-      offsetZ: number;
-    }
-  > = new Map();
+  private chunks: Map<string, ChunkEntry> = new Map();
   private noiseRanges?: {
     hillMin: number;
     hillMax: number;
     detailMin: number;
     detailMax: number;
   };
-  private water: Water;
+  private noiseGenerator: NoiseGenerator;
+  private waterNormals: THREE.Texture;
   private waterLevel = 16;
+  private sharedWaterGeometry?: THREE.PlaneGeometry;
+  private skyController: SkyController;
 
   constructor(skyController: SkyController) {
     super();
+    this.skyController = skyController;
+    this.noiseGenerator = new NoiseGenerator();
+    const sampleChunks = 4;
     this.noiseRanges = this.computeNoiseRanges(
-      this.worldWidth,
-      this.worldDepth,
+      this.chunkSize * sampleChunks,
+      this.chunkSize * sampleChunks,
     );
-    this.cellSize = this.planeSize / (this.worldWidth - 1);
+    // Load shared water normals texture once for all chunk waters
+    this.waterNormals = new THREE.TextureLoader().load(
+      new URL('textures/waternormals.jpg', import.meta.url).href,
+      (waterTexture) => {
+        waterTexture.wrapS = THREE.RepeatWrapping;
+        waterTexture.wrapT = THREE.RepeatWrapping;
+      },
+    );
 
     // Load an initial area around origin (player at 0,0)
-    this.updateChunks(0, 0, 2);
-    const half = this.planeSize / 2;
-    const gx0 = ((0 + half) / this.planeSize) * (this.worldWidth - 1);
-    const gz0 = ((0 + half) / this.planeSize) * (this.worldDepth - 1);
+    this.updateChunks(0, 0, 1);
+    // With the new mapping, cell (0,0) sits at world position (0,0).
+    const gx0 = 0 / this.cellSize;
+    const gz0 = 0 / this.cellSize;
     this.lastChunkX = Math.floor(gx0 / this.chunkSize);
     this.lastChunkZ = Math.floor(gz0 / this.chunkSize);
-
-    // Create water plane owned by the Terrain group
-    const waterGeometry = new THREE.PlaneGeometry(
-      this.planeSize,
-      this.planeSize,
-    );
-    const water = new Water(waterGeometry, {
-      distortionScale: 3.7,
-      fog: false,
-      sunColor: new THREE.Color('white'),
-      sunDirection: new THREE.Vector3(),
-      textureHeight: 1024,
-      textureWidth: 1024,
-      waterColor: new THREE.Color('#001e0f'),
-      waterNormals: new THREE.TextureLoader().load(
-        new URL('textures/waternormals.jpg', import.meta.url).href,
-        (waterTexture) => {
-          waterTexture.wrapS = THREE.RepeatWrapping;
-          waterTexture.wrapT = THREE.RepeatWrapping;
-        },
-      ),
-    });
-    water.rotation.x = -Math.PI / 2;
-    water.position.y = this.waterLevel;
-    water.material.uniforms.size.value = 2;
-    water.material.uniforms.sunDirection.value
-      .copy(skyController.sun)
-      .normalize();
-    this.water = water;
-    this.add(this.water);
   }
 
   private generateHeight(
@@ -100,82 +80,48 @@ export class Terrain extends THREE.Group {
     offsetZ = 0,
   ) {
     const size = width * depth;
-    const hill = new Float32Array(size);
-    const detail = new Float32Array(size);
     const out = new Float32Array(size);
-    const perlin = new ImprovedNoise();
-    const z = this.seed;
 
-    let hillMin = Infinity;
-    let hillMax = -Infinity;
-    let detailMin = Infinity;
-    let detailMax = -Infinity;
-    if (this.noiseRanges) {
-      const {
-        hillMin: hMin,
-        hillMax: hMax,
-        detailMin: dMin,
-        detailMax: dMax,
-      } = this.noiseRanges;
-      hillMin = hMin;
-      hillMax = hMax;
-      detailMin = dMin;
-      detailMax = dMax;
-    }
+    // Use global noiseRanges (precomputed) when available to avoid a local pass
+    const nr = this.noiseRanges ?? {
+      detailMax: 1,
+      detailMin: -1,
+      hillMax: 1,
+      hillMin: -1,
+    };
 
-    // Sample hill and detail noises into separate arrays
+    const hillRange = nr.hillMax - nr.hillMin || 1;
+    const detailRange = nr.detailMax - nr.detailMin || 1;
+    const edge0 = this.flatThreshold - this.flatBlend;
+    const edge1 = this.flatThreshold + this.flatBlend;
+
     for (let index = 0; index < size; index++) {
       const x = offsetX + (index % width);
       const y = offsetZ + Math.floor(index / width);
 
-      let amp = 1;
-      let freq = this.hillNoiseScale;
-      let hValue = 0;
-      for (let octave = 0; octave < this.hillOctaves; octave++) {
-        hValue += perlin.noise(x * freq, y * freq, z) * amp;
-        amp *= this.hillPersistence;
-        freq *= this.lacunarity;
-      }
+      const hRaw = this.noiseGenerator.sampleOctaves(x, y, {
+        lacunarity: this.lacunarity,
+        octaves: this.hillOctaves,
+        offsetZ: this.seed,
+        persistence: this.hillPersistence,
+        scale: this.hillNoiseScale,
+      });
 
-      amp = 1;
-      freq = this.detailNoiseScale;
-      let dValue = 0;
-      // Offset Z to decorrelate detail from hills
-      const dz = z + 512;
-      for (let octave = 0; octave < this.detailOctaves; octave++) {
-        dValue += perlin.noise(x * freq, y * freq, dz) * amp;
-        amp *= this.detailPersistence;
-        freq *= this.lacunarity;
-      }
+      const dRaw = this.noiseGenerator.sampleOctaves(x, y, {
+        lacunarity: this.lacunarity,
+        octaves: this.detailOctaves,
+        offsetZ: this.seed + 512,
+        persistence: this.detailPersistence,
+        scale: this.detailNoiseScale,
+      });
 
-      hill[index] = hValue;
-      detail[index] = dValue;
-      if (!this.noiseRanges) {
-        if (hValue < hillMin) hillMin = hValue;
-        if (hValue > hillMax) hillMax = hValue;
-        if (dValue < detailMin) detailMin = dValue;
-        if (dValue > detailMax) detailMax = dValue;
-      }
-    }
+      const hillNorm = (hRaw - nr.hillMin) / hillRange;
+      const detailNorm = (dRaw - nr.detailMin) / detailRange;
 
-    // Normalize both to 0..1
-    const hillRange = hillMax - hillMin || 1;
-    const detailRange = detailMax - detailMin || 1;
-    for (let index = 0; index < size; index++) {
-      hill[index] = (hill[index] - hillMin) / hillRange;
-      detail[index] = (detail[index] - detailMin) / detailRange;
-    }
-
-    // Combine using a mask derived from hill noise: low hills -> flat (suppress detail)
-    const edge0 = this.flatThreshold - this.flatBlend;
-    const edge1 = this.flatThreshold + this.flatBlend;
-    for (let index = 0; index < size; index++) {
-      const mask = Terrain.smoothStep(hill[index], edge0, edge1);
-      // Combine: hills always present; details only where mask > 0
+      const mask = Terrain.smoothStep(hillNorm, edge0, edge1);
       const combined =
-        hill[index] * this.hillAmplitude +
-        detail[index] * this.detailAmplitude * mask;
-      // Clamp to non-negative before applying fractional exponent to avoid NaN
+        hillNorm * this.hillAmplitude +
+        detailNorm * this.detailAmplitude * mask;
       const clamped = Math.max(0, combined);
       out[index] = clamped ** this.elevationExponent;
     }
@@ -184,9 +130,7 @@ export class Terrain extends THREE.Group {
   }
 
   private sampleCellHeight(ix: number, iz: number) {
-    const chunkValues = [...this.chunks.values()];
-    for (let ci = 0; ci < chunkValues.length; ci += 1) {
-      const chunkItem = chunkValues[ci];
+    for (const chunkItem of this.chunks.values())
       if (
         ix >= chunkItem.offsetX &&
         ix < chunkItem.offsetX + chunkItem.width &&
@@ -198,7 +142,7 @@ export class Terrain extends THREE.Group {
         const index = lx + lz * chunkItem.width;
         return chunkItem.heightData[index] || 0;
       }
-    }
+
     return 0;
   }
 
@@ -245,6 +189,14 @@ export class Terrain extends THREE.Group {
       sampleIndex += 1;
     }
 
+    // Ensure normals reflect displaced vertices
+    geometry.attributes.position.needsUpdate = true;
+    geometry.computeVertexNormals();
+    const normalAttribute = geometry.attributes.normal as
+      | THREE.BufferAttribute
+      | undefined;
+    if (normalAttribute) normalAttribute.needsUpdate = true;
+
     const texture = new THREE.CanvasTexture(
       Terrain.generateTexture(heightData, cw, cd, this.textureScale),
     );
@@ -256,12 +208,24 @@ export class Terrain extends THREE.Group {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.receiveShadow = true;
 
-    const centerX =
-      -this.planeSize / 2 + (offsetX + (cw - 1) / 2) * this.cellSize;
-    const centerZ =
-      -this.planeSize / 2 + (offsetZ + (cd - 1) / 2) * this.cellSize;
+    const centerX = (offsetX + (cw - 1) / 2) * this.cellSize;
+    const centerZ = (offsetZ + (cd - 1) / 2) * this.cellSize;
     mesh.position.set(centerX, 0, centerZ);
-
+    // Create a water plane for this chunk
+    const water = this.createWater(
+      chunkPlaneWidth,
+      chunkPlaneDepth,
+      centerX,
+      centerZ,
+    );
+    water.rotation.x = -Math.PI / 2;
+    // Position water at same horizontal center as chunk, and at configured level
+    water.position.set(centerX, this.waterLevel, centerZ);
+    water.material.uniforms.size.value = 2;
+    water.material.uniforms.sunDirection.value
+      .copy(this.skyController.sun)
+      .normalize();
+    this.add(water);
     const key = Terrain.makeKey(cx, cz);
     this.chunks.set(key, {
       depth: cd,
@@ -269,9 +233,38 @@ export class Terrain extends THREE.Group {
       mesh,
       offsetX,
       offsetZ,
+      water,
       width: cw,
     });
     this.add(mesh);
+  }
+
+  private createWater(
+    width: number,
+    depth: number,
+    centerX: number,
+    centerZ: number,
+  ) {
+    if (!this.sharedWaterGeometry)
+      this.sharedWaterGeometry = new THREE.PlaneGeometry(width, depth);
+
+    const water = new Water(this.sharedWaterGeometry, {
+      distortionScale: 3.7,
+      fog: false,
+      sunColor: new THREE.Color('white'),
+      sunDirection: new THREE.Vector3(),
+      textureHeight: 1024,
+      textureWidth: 1024,
+      waterColor: new THREE.Color('#001e0f'),
+      waterNormals: this.waterNormals,
+    });
+    water.rotation.x = -Math.PI / 2;
+    water.position.set(centerX, this.waterLevel, centerZ);
+    water.material.uniforms.size.value = 2;
+    water.material.uniforms.sunDirection.value
+      .copy(this.skyController.sun)
+      .normalize();
+    return water;
   }
 
   private disposeChunk(cx: number, cz: number) {
@@ -279,6 +272,19 @@ export class Terrain extends THREE.Group {
     const entry = this.chunks.get(key);
     if (!entry) return;
     this.remove(entry.mesh);
+    if (entry.water) {
+      this.remove(entry.water);
+      try {
+        entry.water.geometry.dispose();
+      } catch (error) {
+        console.warn('Terrain: failed disposing water geometry', error);
+      }
+      try {
+        entry.water.material.dispose();
+      } catch (error) {
+        console.warn('Terrain: failed disposing water material', error);
+      }
+    }
     const geom = entry.mesh.geometry;
     const mat = entry.mesh.material;
     if (Array.isArray(mat)) {
@@ -302,10 +308,10 @@ export class Terrain extends THREE.Group {
     this.chunks.delete(key);
   }
 
-  public updateChunks(playerX: number, playerZ: number, radius = 2) {
-    const half = this.planeSize / 2;
-    const gx = ((playerX + half) / this.planeSize) * (this.worldWidth - 1);
-    const gz = ((playerZ + half) / this.planeSize) * (this.worldDepth - 1);
+  public updateChunks(playerX: number, playerZ: number, radius = 1) {
+    // Map world coordinates to grid cell coordinates (cell size units)
+    const gx = playerX / this.cellSize;
+    const gz = playerZ / this.cellSize;
     const centerCX = Math.floor(gx / this.chunkSize);
     const centerCZ = Math.floor(gz / this.chunkSize);
 
@@ -322,60 +328,53 @@ export class Terrain extends THREE.Group {
       if (!this.chunks.has(key)) this.createChunk(cx, cz);
     }
     // Dispose chunks not wanted
-    const keys = [...this.chunks.keys()];
-    for (let ki = 0; ki < keys.length; ki += 1) {
-      const key = keys[ki];
+    for (const key of this.chunks.keys())
       if (!wanted.has(key)) {
         const [sx, sz] = key.split(',').map(Number);
         this.disposeChunk(sx, sz);
       }
-    }
   }
 
   public updatePlayerPosition(position: THREE.Vector3) {
-    const half = this.planeSize / 2;
-    const gx = ((position.x + half) / this.planeSize) * (this.worldWidth - 1);
-    const gz = ((position.z + half) / this.planeSize) * (this.worldDepth - 1);
+    const gx = position.x / this.cellSize;
+    const gz = position.z / this.cellSize;
     const cx = Math.floor(gx / this.chunkSize);
     const cz = Math.floor(gz / this.chunkSize);
     if (this.lastChunkX !== cx || this.lastChunkZ !== cz) {
       this.lastChunkX = cx;
       this.lastChunkZ = cz;
-      this.updateChunks(position.x, position.z, 2);
+      this.updateChunks(position.x, position.z, 1);
     }
   }
 
   private computeNoiseRanges(width: number, depth: number) {
-    const perlin = new ImprovedNoise();
-    const z = this.seed;
     let hillMin = Infinity;
     let hillMax = -Infinity;
     let detailMin = Infinity;
     let detailMax = -Infinity;
     const size = width * depth;
+    const startX = -Math.floor(width / 2);
+    const startY = -Math.floor(depth / 2);
 
     for (let index = 0; index < size; index += 1) {
-      const x = index % width;
-      const y = Math.floor(index / width);
+      const x = startX + (index % width);
+      const y = startY + Math.floor(index / width);
 
-      let amp = 1;
-      let freq = this.hillNoiseScale;
-      let hValue = 0;
-      for (let octave = 0; octave < this.hillOctaves; octave += 1) {
-        hValue += perlin.noise(x * freq, y * freq, z) * amp;
-        amp *= this.hillPersistence;
-        freq *= this.lacunarity;
-      }
+      const hValue = this.noiseGenerator.sampleOctaves(x, y, {
+        lacunarity: this.lacunarity,
+        octaves: this.hillOctaves,
+        offsetZ: this.seed,
+        persistence: this.hillPersistence,
+        scale: this.hillNoiseScale,
+      });
 
-      amp = 1;
-      freq = this.detailNoiseScale;
-      let dValue = 0;
-      const dz = z + 512;
-      for (let octave = 0; octave < this.detailOctaves; octave += 1) {
-        dValue += perlin.noise(x * freq, y * freq, dz) * amp;
-        amp *= this.detailPersistence;
-        freq *= this.lacunarity;
-      }
+      const dValue = this.noiseGenerator.sampleOctaves(x, y, {
+        lacunarity: this.lacunarity,
+        octaves: this.detailOctaves,
+        offsetZ: this.seed + 512,
+        persistence: this.detailPersistence,
+        scale: this.detailNoiseScale,
+      });
 
       if (hValue < hillMin) hillMin = hValue;
       if (hValue > hillMax) hillMax = hValue;
@@ -449,24 +448,14 @@ export class Terrain extends THREE.Group {
     canvasScaled.height = Math.max(1, height * textureScale);
     const contextScaled = canvasScaled.getContext('2d');
     if (!contextScaled) return canvasScaled;
-    contextScaled.scale(textureScale, textureScale);
-    contextScaled.drawImage(canvas, 0, 0);
-
-    const image2 = contextScaled.getImageData(
+    contextScaled.imageSmoothingEnabled = true;
+    contextScaled.drawImage(
+      canvas,
       0,
       0,
       canvasScaled.width,
       canvasScaled.height,
     );
-    const imageData2 = image2.data;
-    const image2Length = imageData2.length;
-    for (let byte2 = 0; byte2 < image2Length; byte2 += 4) {
-      const noise = Math.trunc(Math.random() * 5);
-      imageData2[byte2] += noise;
-      imageData2[byte2 + 1] += noise;
-      imageData2[byte2 + 2] += noise;
-    }
-    contextScaled.putImageData(image2, 0, 0);
 
     return canvasScaled;
   }
@@ -488,9 +477,9 @@ export class Terrain extends THREE.Group {
   }
 
   public getHeightAt(x: number, z: number) {
-    const half = this.planeSize / 2;
-    const fx = ((x + half) / this.planeSize) * (this.worldWidth - 1);
-    const fz = ((z + half) / this.planeSize) * (this.worldDepth - 1);
+    // Map world coordinates to grid cell coordinates
+    const fx = x / this.cellSize;
+    const fz = z / this.cellSize;
     const ix = Math.floor(fx);
     const iz = Math.floor(fz);
     const tx = fx - ix;
@@ -512,7 +501,15 @@ export class Terrain extends THREE.Group {
   }
 
   update(delta: number): void {
-    (this.water.material.uniforms.time as THREE.IUniform<number>).value +=
-      delta;
+    // Update time and sun direction for all chunk waters
+    for (const ch of this.chunks.values())
+      if (ch.water) {
+        const uniforms = ch.water.material.uniforms as {
+          time: THREE.IUniform<number>;
+          sunDirection: THREE.IUniform<THREE.Vector3>;
+        };
+        uniforms.time.value += delta;
+        uniforms.sunDirection.value.copy(this.skyController.sun).normalize();
+      }
   }
 }
