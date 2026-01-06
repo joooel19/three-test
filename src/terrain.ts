@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { ImprovedNoise } from 'three/addons/math/ImprovedNoise.js';
+import { SkyController } from './sky';
+import { Water } from 'three/examples/jsm/objects/Water';
 
-export class Terrain extends THREE.Mesh {
+export class Terrain extends THREE.Group {
   private worldWidth = 200;
   private worldDepth = 200;
   private planeSize = 4096;
@@ -21,21 +23,24 @@ export class Terrain extends THREE.Mesh {
   private flatThreshold = 0.35;
   private flatBlend = 0.12;
   private heightData: Float32Array;
+  private terrainMesh: THREE.Mesh;
+  private water: Water;
+  private waterLevel = 16;
 
-  constructor() {
+  constructor(skyController: SkyController) {
     super();
 
     this.heightData = this.generateHeight(this.worldWidth, this.worldDepth);
 
-    this.geometry = new THREE.PlaneGeometry(
+    const geometry = new THREE.PlaneGeometry(
       this.planeSize,
       this.planeSize,
       this.worldWidth - 1,
       this.worldDepth - 1,
     );
-    this.geometry.rotateX(-Math.PI / 2);
+    geometry.rotateX(-Math.PI / 2);
 
-    const vertices = this.geometry.attributes.position.array as Float32Array;
+    const vertices = geometry.attributes.position.array as Float32Array;
     const vertLength = vertices.length;
     let sampleIndex = 0;
     for (let vertIndex = 0; vertIndex < vertLength; vertIndex += 3) {
@@ -55,8 +60,40 @@ export class Terrain extends THREE.Mesh {
     texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.colorSpace = THREE.SRGBColorSpace;
 
-    this.material = new THREE.MeshPhongMaterial({ map: texture });
-    this.receiveShadow = true;
+    const material = new THREE.MeshPhongMaterial({ map: texture });
+    this.terrainMesh = new THREE.Mesh(geometry, material);
+    this.terrainMesh.receiveShadow = true;
+    this.add(this.terrainMesh);
+
+    // Create water plane owned by the Terrain group
+    const waterGeometry = new THREE.PlaneGeometry(
+      this.planeSize,
+      this.planeSize,
+    );
+    const water = new Water(waterGeometry, {
+      distortionScale: 3.7,
+      fog: false,
+      sunColor: new THREE.Color('white'),
+      sunDirection: new THREE.Vector3(),
+      textureHeight: 1024,
+      textureWidth: 1024,
+      waterColor: new THREE.Color('#001e0f'),
+      waterNormals: new THREE.TextureLoader().load(
+        new URL('textures/waternormals.jpg', import.meta.url).href,
+        (waterTexture) => {
+          waterTexture.wrapS = THREE.RepeatWrapping;
+          waterTexture.wrapT = THREE.RepeatWrapping;
+        },
+      ),
+    });
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = this.waterLevel;
+    water.material.uniforms.size.value = 11;
+    water.material.uniforms.sunDirection.value
+      .copy(skyController.sun)
+      .normalize();
+    this.water = water;
+    this.add(this.water);
   }
 
   private generateHeight(width: number, depth: number) {
@@ -279,5 +316,10 @@ export class Terrain extends THREE.Mesh {
     const h1 = h11 * (1 - tx) + h21 * tx;
     const h2 = h12 * (1 - tx) + h22 * tx;
     return h1 * (1 - tz) + h2 * tz;
+  }
+
+  update(delta: number): void {
+    (this.water.material.uniforms.time as THREE.IUniform<number>).value +=
+      delta;
   }
 }

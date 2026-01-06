@@ -7,8 +7,8 @@ import { CloudVolume } from './cloud';
 import { Sky } from 'three/examples/jsm/objects/Sky';
 
 export class SkyController extends THREE.Group {
+  public sun: THREE.Vector3;
   private sky: Sky;
-  private sun: THREE.Vector3;
   private sunLight: THREE.DirectionalLight;
   private ambient: THREE.AmbientLight;
   private lensflareLight: THREE.PointLight;

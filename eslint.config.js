@@ -33,6 +33,7 @@ export default defineConfig(
         },
       ],
       'init-declarations': 'off',
+      'max-lines': 'off',
       'max-lines-per-function': 'off',
       'max-params': ['error', 5],
       'max-statements': ['error', 100],

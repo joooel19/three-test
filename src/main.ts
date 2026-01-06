@@ -24,13 +24,13 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.5;
 container.append(renderer.domElement);
 
-// Terrain
-const terrain = new Terrain();
-scene.add(terrain);
-
 // Sky, lighting and shadows
 const skyController = new SkyController();
 scene.add(skyController);
+
+// Terrain
+const terrain = new Terrain(skyController);
+scene.add(terrain);
 
 // Player (pointer-lock + movement)
 const blocker = document.getElementById('blocker');
@@ -58,8 +58,9 @@ function onWindowResize(): void {
 window.addEventListener('resize', onWindowResize, false);
 renderer.setAnimationLoop(() => {
   const delta = clock.getDelta();
-  player.update(delta);
   skyController.update(camera);
+  terrain.update(delta);
+  player.update(delta);
   renderer.render(scene, camera);
   stats.update();
 });
