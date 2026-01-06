@@ -54,6 +54,95 @@ export class Terrain extends THREE.Group {
     this.lastChunkZ = Math.floor(gz0 / this.chunkSize);
   }
 
+  private smoothChunkBorders() {
+    const cw = this.chunkSize + 1;
+    const cd = this.chunkSize + 1;
+
+    for (const key of this.chunks.keys()) {
+      const [cx, cz] = key.split(',').map(Number);
+      const chunk = this.chunks.get(key);
+      if (!chunk) continue;
+      const geomA = chunk.mesh.geometry;
+      const na = (
+        geomA as unknown as { attributes?: { normal?: THREE.BufferAttribute } }
+      ).attributes?.normal;
+      if (!na) continue;
+      const arrayA = na.array as Float32Array;
+
+      // Neighbor on +X (right edge of A with left edge of B)
+      const rightKey = Terrain.makeKey(cx + 1, cz);
+      const right = this.chunks.get(rightKey);
+      if (right) {
+        const geomB = right.mesh.geometry;
+        const nb = (
+          geomB as unknown as {
+            attributes?: { normal?: THREE.BufferAttribute };
+          }
+        ).attributes?.normal;
+        if (nb) {
+          const arrayB = nb.array as Float32Array;
+          for (let lz = 0; lz < cd; lz += 1) {
+            const ia = cw - 1 + lz * cw;
+            const ib = 0 + lz * cw;
+            const ax = arrayA[ia * 3];
+            const ay = arrayA[ia * 3 + 1];
+            const az = arrayA[ia * 3 + 2];
+            const bx = arrayB[ib * 3];
+            const by = arrayB[ib * 3 + 1];
+            const bz = arrayB[ib * 3 + 2];
+            const mx = (ax + bx) * 0.5;
+            const my = (ay + by) * 0.5;
+            const mz = (az + bz) * 0.5;
+            arrayA[ia * 3] = mx;
+            arrayA[ia * 3 + 1] = my;
+            arrayA[ia * 3 + 2] = mz;
+            arrayB[ib * 3] = mx;
+            arrayB[ib * 3 + 1] = my;
+            arrayB[ib * 3 + 2] = mz;
+          }
+          na.needsUpdate = true;
+          nb.needsUpdate = true;
+        }
+      }
+
+      // Neighbor on +Z (far edge of A with near edge of B)
+      const farKey = Terrain.makeKey(cx, cz + 1);
+      const far = this.chunks.get(farKey);
+      if (far) {
+        const geomB = far.mesh.geometry;
+        const nb = (
+          geomB as unknown as {
+            attributes?: { normal?: THREE.BufferAttribute };
+          }
+        ).attributes?.normal;
+        if (nb) {
+          const arrayB = nb.array as Float32Array;
+          for (let lx = 0; lx < cw; lx += 1) {
+            const ia = lx + (cd - 1) * cw;
+            const ib = lx + 0 * cw;
+            const ax = arrayA[ia * 3];
+            const ay = arrayA[ia * 3 + 1];
+            const az = arrayA[ia * 3 + 2];
+            const bx = arrayB[ib * 3];
+            const by = arrayB[ib * 3 + 1];
+            const bz = arrayB[ib * 3 + 2];
+            const mx = (ax + bx) * 0.5;
+            const my = (ay + by) * 0.5;
+            const mz = (az + bz) * 0.5;
+            arrayA[ia * 3] = mx;
+            arrayA[ia * 3 + 1] = my;
+            arrayA[ia * 3 + 2] = mz;
+            arrayB[ib * 3] = mx;
+            arrayB[ib * 3 + 1] = my;
+            arrayB[ib * 3 + 2] = mz;
+          }
+          na.needsUpdate = true;
+          nb.needsUpdate = true;
+        }
+      }
+    }
+  }
+
   private generateHeight(
     width: number,
     depth: number,
@@ -271,6 +360,9 @@ export class Terrain extends THREE.Group {
         const [sx, sz] = key.split(',').map(Number);
         this.disposeChunk(sx, sz);
       }
+
+    // After creating/disposing chunks, smooth normals along chunk borders
+    this.smoothChunkBorders();
   }
 
   public updatePlayerPosition(position: THREE.Vector3) {
