@@ -13,7 +13,8 @@
     "tsc": "tsc"
   },
   "dependencies": {
-    "three": "^0.182.0"
+    "three": "^0.182.0",
+    "@dgreenheck/ez-tree": "^1.0.0"
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "^4.5.0",

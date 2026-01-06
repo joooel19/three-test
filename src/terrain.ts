@@ -3,6 +3,7 @@ import { ChunkEntry, TerrainChunk } from './terrain-chunk';
 import { GrassChunk } from './grass-chunk';
 import { NoiseGenerator } from './noise';
 import { SkyController } from './sky';
+import { Tree } from '@dgreenheck/ez-tree';
 
 export class Terrain extends THREE.Group {
   private chunkSize = 8;
@@ -34,11 +35,20 @@ export class Terrain extends THREE.Group {
   private chunkRadius = 3;
   private waterLevel = 16;
   private skyController: SkyController;
+  private treePoolSize = 8;
+  private baseTrees: THREE.Object3D[] = [];
 
   constructor(skyController: SkyController) {
     super();
     this.skyController = skyController;
     this.noiseGenerator = new NoiseGenerator();
+    // Pre-generate a small pool of tree prototypes to clone per-chunk
+    for (let index = 0; index < this.treePoolSize; index += 1) {
+      const treePrototype = new Tree();
+      treePrototype.options.seed = Math.random() * 12_345;
+      treePrototype.generate();
+      this.baseTrees.push(treePrototype);
+    }
     const sampleChunks = 4;
     this.noiseRanges = this.computeNoiseRanges(
       this.chunkSize * sampleChunks,
@@ -379,12 +389,40 @@ export class Terrain extends THREE.Group {
       width: chunkPlaneWidth,
     });
 
+    // Create one random tree for this chunk using a pregenerated pool
+    const objects: THREE.Object3D[] = [];
+    if (this.baseTrees.length > 0) {
+      const margin = this.cellSize;
+      const rx =
+        Math.random() * (chunkPlaneWidth - margin * 2) -
+        (chunkPlaneWidth / 2 - margin);
+      const rz =
+        Math.random() * (chunkPlaneDepth - margin * 2) -
+        (chunkPlaneDepth / 2 - margin);
+      const worldX = centerX + rx;
+      const worldZ = centerZ + rz;
+      const y = sampleFromHeightData(worldX, worldZ);
+      // Skip placing trees that would be underwater
+      if (y > this.waterLevel + 12) {
+        const seed = cx * 73_856_093 + cz * 19_349_663;
+        const pickIndex = Math.abs(seed) % this.baseTrees.length;
+        const prototype = this.baseTrees[pickIndex];
+        const treeClone = prototype.clone(true);
+        // Small scale variation
+        const scaleFactor = 0.8 + Math.random() * 0.8;
+        treeClone.scale.set(scaleFactor, scaleFactor, scaleFactor);
+        treeClone.position.set(worldX, y, worldZ);
+        objects.push(treeClone);
+      }
+    }
+
     const key = Terrain.makeKey(cx, cz);
     const entry: ChunkEntry = {
       depth: cd,
       grass,
       heightData,
       mesh,
+      objects,
       offsetX,
       offsetZ,
       width: cw,

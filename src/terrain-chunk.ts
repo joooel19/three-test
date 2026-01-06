@@ -10,6 +10,7 @@ export interface ChunkEntry {
   offsetX: number;
   offsetZ: number;
   grass: GrassChunk;
+  objects: THREE.Object3D[];
 }
 
 export class TerrainChunk {
@@ -20,6 +21,7 @@ export class TerrainChunk {
   public offsetX: number;
   public offsetZ: number;
   public grass: GrassChunk;
+  public objects: THREE.Object3D[];
 
   constructor(entry: ChunkEntry) {
     this.mesh = entry.mesh;
@@ -29,11 +31,13 @@ export class TerrainChunk {
     this.offsetX = entry.offsetX;
     this.offsetZ = entry.offsetZ;
     this.grass = entry.grass;
+    this.objects = entry.objects;
   }
 
   addTo(parent: THREE.Group) {
     parent.add(this.grass.mesh);
     parent.add(this.mesh);
+    for (const object of this.objects) parent.add(object);
   }
 
   sampleCellHeight(ix: number, iz: number) {
@@ -55,6 +59,41 @@ export class TerrainChunk {
   dispose(parent: THREE.Group) {
     parent.remove(this.mesh);
     this.grass.dispose(parent);
+
+    const disposeMaterial = (
+      materialParameter: THREE.Material | THREE.Material[] | null | undefined,
+    ) => {
+      if (!materialParameter) return;
+      if (Array.isArray(materialParameter)) {
+        for (const item of materialParameter) {
+          const maybeMap = (
+            item as unknown as {
+              map?: { dispose: () => void };
+            }
+          ).map;
+          if (maybeMap && typeof maybeMap.dispose === 'function')
+            maybeMap.dispose();
+          item.dispose();
+        }
+        return;
+      }
+      const maybeMap = (
+        materialParameter as unknown as {
+          map?: { dispose: () => void };
+        }
+      ).map;
+      if (maybeMap && typeof maybeMap.dispose === 'function')
+        maybeMap.dispose();
+      (materialParameter as unknown as { dispose?: () => void }).dispose?.();
+    };
+
+    for (const object of this.objects) {
+      parent.remove(object);
+      if (!(object instanceof THREE.Mesh)) continue;
+      const meshObject = object as THREE.Mesh;
+      meshObject.geometry.dispose();
+      disposeMaterial(meshObject.material);
+    }
 
     const geom = this.mesh.geometry;
     const mat = this.mesh.material;
