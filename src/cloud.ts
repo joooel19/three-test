@@ -162,7 +162,7 @@ export class CloudVolume extends THREE.Mesh {
     );
     this.position.set(
       Math.cos(angle) * radius,
-      getRandomArbitrary(80, 220),
+      getRandomArbitrary(220, 360),
       Math.sin(angle) * radius,
     );
   }

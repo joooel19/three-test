@@ -6,6 +6,7 @@ export type PlayerOptions = {
   gravity: number;
   jumpVelocity: number;
   height: number;
+  ground?: (x: number, z: number) => number;
 };
 
 export class Player {
@@ -26,6 +27,7 @@ export class Player {
   private readonly gravity: number;
   private readonly jumpVelocity: number;
   private readonly height: number;
+  private readonly groundFn?: (x: number, z: number) => number;
   private readonly bobFreq = 8;
   private readonly bobAmpY = 0.03;
   private readonly bobAmpX = 0.02;
@@ -40,6 +42,7 @@ export class Player {
     this.gravity = options.gravity * 10;
     this.jumpVelocity = options.jumpVelocity * 10;
     this.height = options.height;
+    this.groundFn = options.ground;
 
     this.controls = new PointerLockControls(camera, domElement);
     this.object = this.controls.object;
@@ -151,9 +154,13 @@ export class Player {
     // Apply vertical motion
     this.object.position.y += this.velocity.y * delta;
 
-    if (this.object.position.y < this.height) {
+    const groundY = this.groundFn
+      ? this.groundFn(this.object.position.x, this.object.position.z)
+      : 0;
+
+    if (this.object.position.y < groundY + this.height) {
       this.velocity.y = 0;
-      this.object.position.y = this.height;
+      this.object.position.y = groundY + this.height;
       this.canJump = true;
     }
 
