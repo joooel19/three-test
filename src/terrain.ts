@@ -6,6 +6,7 @@ import { SkyController } from './sky';
 import { Tree } from '@dgreenheck/ez-tree';
 import { Daisy } from './daisy';
 import { AnemoneFlower } from './anemone-flower';
+import { CrocusFlower } from './crocus-flower';
 
 export class Terrain extends THREE.Group {
   private chunkSize = 8;
@@ -496,12 +497,16 @@ export class Terrain extends THREE.Group {
       const hNeighbor = sampleFromHeightData(worldX + this.cellSize, worldZ);
       const slope = Math.abs(hNeighbor - y) / this.cellSize;
       if (slope > 0.6) continue;
-      const scaleFactor = 0.6 + Math.random() * 0.8;
-      // Randomly choose between Daisy and Anemone
-      const flowerObject: THREE.Object3D =
-        Math.random() < 0.5
-          ? new Daisy(scaleFactor)
-          : new AnemoneFlower(scaleFactor);
+      const scaleFactor = 0.8 + Math.random() * 0.4;
+      // Randomly choose between Daisy, Anemone and Crocus
+      const flowerConstructors: Array<new (s: number) => THREE.Object3D> = [
+        Daisy,
+        AnemoneFlower,
+        CrocusFlower,
+      ];
+      const pickIndex = Math.floor(Math.random() * flowerConstructors.length);
+      const ChosenFlower = flowerConstructors[pickIndex];
+      const flowerObject: THREE.Object3D = new ChosenFlower(scaleFactor);
       flowerObject.position.set(worldX, y, worldZ);
       objects.push(flowerObject);
     }
