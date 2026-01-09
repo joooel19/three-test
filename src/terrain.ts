@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ChunkEntry, TerrainChunk } from './terrain-chunk';
-import { GrassChunk } from './grass-chunk';
+import { Grass } from './grass';
 import { NoiseGenerator } from './noise';
 import { SkyController } from './sky';
 import { Tree } from '@dgreenheck/ez-tree';
@@ -389,7 +389,7 @@ export class Terrain extends THREE.Group {
       return (h1 * (1 - tz) + h2 * tz) * this.heightScale;
     };
 
-    const grass = new GrassChunk({
+    const grass = new Grass({
       bladeCount: 100_000,
       centerX,
       centerZ,

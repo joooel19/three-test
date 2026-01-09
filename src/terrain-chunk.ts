@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GrassChunk } from './grass-chunk';
+import { Grass } from './grass';
 import { SkyController } from './sky';
 
 export interface ChunkEntry {
@@ -9,7 +9,7 @@ export interface ChunkEntry {
   depth: number;
   offsetX: number;
   offsetZ: number;
-  grass: GrassChunk;
+  grass: Grass;
   objects: THREE.Object3D[];
 }
 
@@ -20,7 +20,7 @@ export class TerrainChunk {
   public depth: number;
   public offsetX: number;
   public offsetZ: number;
-  public grass: GrassChunk;
+  public grass: Grass;
   public objects: THREE.Object3D[];
 
   constructor(entry: ChunkEntry) {

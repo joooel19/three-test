@@ -9,7 +9,7 @@ function smoothStep(value: number, edge0: number, edge1: number) {
 }
 
 // Port of the provided grass implementation adapted for the project's chunk API.
-export class GrassChunk {
+export class Grass {
   public mesh: THREE.Mesh;
   private material: THREE.RawShaderMaterial;
   private geometry: THREE.InstancedBufferGeometry;
