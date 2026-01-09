@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 export abstract class Flower {
-  public group: THREE.Group;
+  public group: THREE.Object3D;
   constructor() {
     this.group = new THREE.Group();
   }
@@ -13,6 +13,9 @@ export abstract class Flower {
   dispose(): void {
     this.group.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
+      // Skip disposing shared resources (prototypes cloned with sharedModel)
+      const { userData } = child as { userData?: Record<string, unknown> };
+      if (userData?.sharedModel === true) return;
       child.geometry.dispose();
       const materialParameter = child.material as
         | THREE.Material

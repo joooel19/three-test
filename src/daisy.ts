@@ -79,10 +79,9 @@ function instantiateWithSharedResources(
 }
 
 export class Daisy extends Flower {
-  private initPromise: Promise<void>;
   constructor(scale = 1) {
     super();
-    this.initPromise = this.init(scale);
+    this.init(scale).catch(console.error);
   }
 
   private async init(scale: number): Promise<void> {
@@ -92,7 +91,16 @@ export class Daisy extends Flower {
     instance.rotateX(-Math.PI / 2);
     // Apply global model scale to reduce imported model size
     instance.scale.multiplyScalar(MODEL_SCALE);
-    this.group.add(instance);
+    // Create LOD: close = full model (shared), mid = simple disk, far = empty
+    const lod = new THREE.LOD();
+    // High detail (shared resources)
+    lod.addLevel(instance, 0);
+
+    // Far level: empty object to effectively hide the flower beyond this
+    lod.addLevel(new THREE.Object3D(), 160);
+
+    // Keep the original group reference so callers who added the group to the scene retain a valid object. Attach the LOD as a child instead.
+    this.group.add(lod);
     this.group.rotation.y = Math.random() * Math.PI * 2;
     const scaleVariable = 0.8 + Math.random() * 0.6;
     this.group.scale.set(

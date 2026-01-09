@@ -54,6 +54,11 @@ export class TerrainChunk {
     const camPos = new THREE.Vector3();
     camera.getWorldPosition(camPos);
     this.grass.update(delta, camPos, skyController);
+    // Update any LOD objects in this chunk (including nested LODs)
+    for (const object of this.objects)
+      object.traverse((child) => {
+        if (child instanceof THREE.LOD) child.update(camera);
+      });
   }
 
   dispose(parent: THREE.Group) {
