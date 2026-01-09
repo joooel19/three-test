@@ -43,7 +43,7 @@ export class Terrain extends THREE.Group {
   private waterLevel = 16;
   private skyController: SkyController;
   private treePoolSize = 8;
-  private baseTrees: THREE.Object3D[] = [];
+  private baseTrees: THREE.LOD[] = [];
   private treeNoiseScale = 0.025;
   private treeNoiseOctaves = 3;
   private treeNoisePersistence = 0.55;
@@ -62,7 +62,10 @@ export class Terrain extends THREE.Group {
       const treePrototype = new Tree();
       treePrototype.options.seed = Math.random() * 12_345;
       treePrototype.generate();
-      this.baseTrees.push(treePrototype);
+      const treeLod = new THREE.LOD();
+      treeLod.addLevel(treePrototype, 0);
+      treeLod.addLevel(new THREE.Object3D(), 320);
+      this.baseTrees.push(treeLod);
     }
     const sampleChunks = 4;
     this.noiseRanges = this.computeNoiseRanges(
