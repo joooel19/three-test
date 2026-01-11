@@ -1,22 +1,16 @@
 import * as THREE from 'three';
-import { ChunkEntry, TerrainChunk } from './terrain-chunk';
+import { TerrainChunk } from './terrain-chunk';
 import { Grass } from './grass/grass';
 import { NoiseGenerator } from './noise';
 import { SkyController } from '../sky/sky';
 import { Tree } from '@dgreenheck/ez-tree';
 import {
-  makeSampleFromHeightData,
-  createGrassForChunk,
-  generateTreesForChunk,
-  generateFlowersForChunk,
-} from './terrain-chunk-utilities';
-
+  createChunkEntry,
+  ChunkFactoryParameters,
+  NoiseRanges,
+} from './terrain-chunk-factory';
 import {
-  buildGeometry,
-  colorGeometry,
-  createNoiseMaterial,
   computeNoiseRanges,
-  smoothStep,
   getChunkNormalArray,
   mergeBorderNormals,
   makeKey,
@@ -144,67 +138,6 @@ export class Terrain extends THREE.Group {
     }
   }
 
-  private generateHeight(
-    width: number,
-    depth: number,
-    offsetX = 0,
-    offsetZ = 0,
-  ) {
-    const size = width * depth;
-    const out = new Float32Array(size);
-
-    // Use global noiseRanges (precomputed) to avoid a local pass
-    const nr = this.noiseRanges;
-
-    const hillRange = nr.hillMax - nr.hillMin || 1;
-    const detailRange = nr.detailMax - nr.detailMin || 1;
-    const edge0 = this.flatThreshold - this.flatBlend;
-    const edge1 = this.flatThreshold + this.flatBlend;
-
-    // Use nested loops (faster than modulo/floor per-iteration) and avoid
-    // Sampling detail noise when the hill mask is zero to reduce noise calls.
-    let sampleIndex = 0;
-    for (let dz = 0; dz < depth; dz += 1) {
-      const y = offsetZ + dz;
-      for (let dx = 0; dx < width; dx += 1) {
-        const x = offsetX + dx;
-
-        const hRaw = this.noiseGenerator.sampleOctaves(x, y, {
-          lacunarity: this.lacunarity,
-          octaves: this.hillOctaves,
-          offsetZ: this.seed,
-          persistence: this.hillPersistence,
-          scale: this.hillNoiseScale,
-        });
-
-        const hillNorm = (hRaw - nr.hillMin) / hillRange;
-
-        // Only sample detail noise when hill mask > 0 to save work.
-        const mask = smoothStep(hillNorm, edge0, edge1);
-        let detailNorm = 0;
-        if (mask > 0) {
-          const dRaw = this.noiseGenerator.sampleOctaves(x, y, {
-            lacunarity: this.lacunarity,
-            octaves: this.detailOctaves,
-            offsetZ: this.seed + 512,
-            persistence: this.detailPersistence,
-            scale: this.detailNoiseScale,
-          });
-          detailNorm = (dRaw - nr.detailMin) / detailRange;
-        }
-
-        const combined =
-          hillNorm * this.hillAmplitude +
-          detailNorm * this.detailAmplitude * mask;
-        const clamped = Math.max(0, combined);
-        out[sampleIndex] = clamped ** this.elevationExponent;
-        sampleIndex += 1;
-      }
-    }
-
-    return out;
-  }
-
   private sampleCellHeight(ix: number, iz: number) {
     // Compute the chunk coordinates directly and perform a keyed lookup
     const cx = Math.floor(ix / this.chunkSize);
@@ -216,122 +149,40 @@ export class Terrain extends THREE.Group {
   }
 
   private createChunk(cx: number, cz: number) {
-    const offsetX = cx * this.chunkSize;
-    const offsetZ = cz * this.chunkSize;
-    const cw = this.chunkSize + 1;
-    const cd = this.chunkSize + 1;
-
-    const heightData = this.generateHeight(cw, cd, offsetX, offsetZ);
-    for (let hi = 0; hi < heightData.length; hi += 1) {
-      const vertex = heightData[hi];
-      if (!Number.isFinite(vertex) || vertex < 0) heightData[hi] = 0;
-    }
-
-    const { geometry, centerX, centerZ, chunkPlaneWidth, chunkPlaneDepth } =
-      buildGeometry({
-        cw,
-        cd,
-        offsetX,
-        offsetZ,
-        heightData,
-        cellSize: this.cellSize,
-        heightScale: this.heightScale,
-      });
-
-    colorGeometry({
-      geometry,
-      centerX,
-      centerZ,
-      cellSize: this.cellSize,
-      waterLevel: this.waterLevel,
-      seed: this.seed,
-      noiseGenerator: this.noiseGenerator,
-    });
-
-    const material = createNoiseMaterial();
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(centerX, 0, centerZ);
-
-    const sampleFromHeightData = makeSampleFromHeightData({
-      heightData,
-      cw,
-      cd,
-      offsetX,
-      offsetZ,
+    const parameters: ChunkFactoryParameters = {
+      chunkSize: this.chunkSize,
       cellSize: this.cellSize,
       heightScale: this.heightScale,
-    });
-
-    const grass = createGrassForChunk({
-      centerX,
-      centerZ,
-      sample: sampleFromHeightData,
-      width: chunkPlaneWidth,
       waterLevel: this.waterLevel,
-    });
-
-    const objects = this.generateObjectsForChunk(
-      centerX,
-      centerZ,
-      chunkPlaneWidth,
-      chunkPlaneDepth,
-      sampleFromHeightData,
-    );
-
-    const key = makeKey(cx, cz);
-    const entry: ChunkEntry = {
-      depth: cd,
-      grass,
-      heightData,
-      mesh,
-      objects,
-      offsetX,
-      offsetZ,
-      width: cw,
-    };
-    const chunk = new TerrainChunk(entry);
-    chunk.addTo(this);
-    this.chunks.set(key, chunk);
-  }
-
-  private generateObjectsForChunk(
-    centerX: number,
-    centerZ: number,
-    chunkPlaneWidth: number,
-    chunkPlaneDepth: number,
-    sampleFromHeightData: (x: number, z: number) => number,
-  ) {
-    const trees = generateTreesForChunk({
-      baseTrees: this.baseTrees,
-      centerX,
-      centerZ,
-      chunkPlaneWidth,
-      chunkPlaneDepth,
-      sampleFromHeightData,
-      cellSize: this.cellSize,
-      noiseGenerator: this.noiseGenerator,
-      lacunarity: this.lacunarity,
-      treeNoiseOctaves: this.treeNoiseOctaves,
       seed: this.seed,
+      lacunarity: this.lacunarity,
+      hillOctaves: this.hillOctaves,
+      detailOctaves: this.detailOctaves,
+      hillPersistence: this.hillPersistence,
+      detailPersistence: this.detailPersistence,
+      hillNoiseScale: this.hillNoiseScale,
+      detailNoiseScale: this.detailNoiseScale,
+      hillAmplitude: this.hillAmplitude,
+      detailAmplitude: this.detailAmplitude,
+      elevationExponent: this.elevationExponent,
+      flatThreshold: this.flatThreshold,
+      flatBlend: this.flatBlend,
+      noiseGenerator: this.noiseGenerator,
+      noiseRanges: this.noiseRanges as NoiseRanges,
+      baseTrees: this.baseTrees,
+      treeNoiseOctaves: this.treeNoiseOctaves,
       treeNoisePersistence: this.treeNoisePersistence,
       treeNoiseScale: this.treeNoiseScale,
       maxTreesPerChunk: this.maxTreesPerChunk,
-      waterLevel: this.waterLevel,
-    });
-    const flowers = generateFlowersForChunk({
-      centerX,
-      centerZ,
-      chunkPlaneWidth,
-      chunkPlaneDepth,
-      sampleFromHeightData,
-      cellSize: this.cellSize,
-      waterLevel: this.waterLevel,
       maxDaisiesPerChunk: this.maxDaisiesPerChunk,
       flowerNoiseScale: this.flowerNoiseScale,
-      noiseGenerator: this.noiseGenerator,
-      seed: this.seed,
-    });
-    return [...trees, ...flowers];
+    };
+
+    const entry = createChunkEntry(cx, cz, parameters);
+    const key = makeKey(cx, cz);
+    const chunk = new TerrainChunk(entry);
+    chunk.addTo(this);
+    this.chunks.set(key, chunk);
   }
 
   private disposeChunk(cx: number, cz: number) {
