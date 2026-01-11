@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { SkyController } from '../sky/sky';
+import type { SkyController } from '../../sky/sky';
 import {
   createFarBase,
   createCrossBase,

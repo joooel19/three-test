@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Grass } from './grass';
+import { Grass } from './grass/grass';
 
 export interface ChunkEntry {
   mesh: THREE.Mesh;

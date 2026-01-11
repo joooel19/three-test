@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ChunkEntry, TerrainChunk } from './terrain-chunk';
-import { Grass } from './grass';
+import { Grass } from './grass/grass';
 import { NoiseGenerator } from './noise';
 import { SkyController } from '../sky/sky';
 import { Tree } from '@dgreenheck/ez-tree';
@@ -9,7 +9,7 @@ import {
   createGrassForChunk,
   generateTreesForChunk,
   generateFlowersForChunk,
-} from './terrain-helpers';
+} from './terrain-chunk-utilities';
 
 import {
   buildGeometry,

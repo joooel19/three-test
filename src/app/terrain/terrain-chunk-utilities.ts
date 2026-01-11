@@ -1,13 +1,13 @@
 import * as THREE from 'three';
-import { Grass } from './grass';
+import { Grass } from './grass/grass';
 import { NoiseGenerator } from './noise';
-import { Daisy } from '../flowers/daisy';
-import { AnemoneFlower } from '../flowers/anemone-flower';
-import { CrocusFlower } from '../flowers/crocus-flower';
-import { DaffodilFlower } from '../flowers/daffodil-flower';
-import { DandelionFlower } from '../flowers/dandelion-flower';
-import { SnowdropFlower } from '../flowers/snowdrop-flower';
-import { Rock } from '../flowers/rock';
+import { Daisy } from './flowers/daisy';
+import { AnemoneFlower } from './flowers/anemone-flower';
+import { CrocusFlower } from './flowers/crocus-flower';
+import { DaffodilFlower } from './flowers/daffodil-flower';
+import { DandelionFlower } from './flowers/dandelion-flower';
+import { SnowdropFlower } from './flowers/snowdrop-flower';
+import { Rock } from './flowers/rock';
 
 export function makeSampleFromHeightData(options: {
   heightData: Float32Array;
