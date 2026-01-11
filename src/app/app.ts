@@ -3,7 +3,6 @@ import Stats from 'three/addons/libs/stats.module.js';
 import { createComposer } from './postprocessing';
 import { Player } from './player';
 import { SkyController } from './sky/sky';
-import { LensflareController } from './sky/lensflare';
 import { Terrain } from './terrain/terrain';
 import { createRenderer } from './renderer';
 
@@ -13,9 +12,6 @@ export function startApp(container: HTMLDivElement): void {
 
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2('#e0e0e0', 0.0025);
-
-  // Separate scene for lensflare to avoid postprocessing (bloom) conflicts
-  const flareScene = new THREE.Scene();
 
   const camera = new THREE.PerspectiveCamera(
     75,
@@ -31,11 +27,6 @@ export function startApp(container: HTMLDivElement): void {
   // Sky, lighting and shadows
   const skyController = new SkyController();
   scene.add(skyController);
-
-  // Lens flare visual (kept in its own scene so bloom doesn't affect it)
-  const lensflare = new LensflareController();
-  lensflare.setSunPosition(skyController.sun);
-  flareScene.add(lensflare);
 
   // Terrain
   const terrain = new Terrain(skyController);
@@ -62,21 +53,10 @@ export function startApp(container: HTMLDivElement): void {
   renderer.setAnimationLoop(() => {
     const delta = clock.getDelta();
     skyController.update(camera, delta);
-    lensflare.update(camera);
     player.update(delta);
     terrain.updatePlayerPosition(player.object.position);
     terrain.update(camera, delta);
-
-    camera.layers.set(0);
-    renderer.autoClear = true;
     composer.render();
-
-    renderer.autoClear = false;
-    renderer.clearDepth();
-
-    camera.layers.set(1);
-    renderer.render(flareScene, camera);
-
     stats.update();
   });
 }
