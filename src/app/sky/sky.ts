@@ -44,9 +44,9 @@ export class SkyController extends THREE.Group {
 
     const { uniforms } = this.sky.material;
     uniforms.turbidity.value = 10;
-    uniforms.rayleigh.value = 3;
+    uniforms.rayleigh.value = 1;
     uniforms.mieCoefficient.value = 0.005;
-    uniforms.mieDirectionalG.value = 0.7;
+    uniforms.mieDirectionalG.value = 0.8;
 
     const phi = THREE.MathUtils.degToRad(90 - this.elevation);
     const theta = THREE.MathUtils.degToRad(this.azimuth);
