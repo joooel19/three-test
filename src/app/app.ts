@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import Stats from 'three/addons/libs/stats.module.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { Player } from './player';
 import { SkyController } from './sky/sky';
 import { Terrain } from './terrain/terrain';
@@ -20,6 +23,23 @@ export function startApp(container: HTMLDivElement): void {
   );
 
   const renderer = createRenderer(container, camera);
+
+  const composer = new EffectComposer(renderer);
+  const renderPass = new RenderPass(scene, camera);
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    1.5, // strength
+    0.4, // radius
+    0.85, // threshold
+  );
+  composer.addPass(renderPass);
+  composer.addPass(bloomPass);
+
+  function onWindowResizeComposer(): void {
+    composer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  window.addEventListener('resize', onWindowResizeComposer, false);
 
   // Sky, lighting and shadows
   const skyController = new SkyController();
@@ -53,7 +73,7 @@ export function startApp(container: HTMLDivElement): void {
     player.update(delta);
     terrain.updatePlayerPosition(player.object.position);
     terrain.update(camera, delta);
-    renderer.render(scene, camera);
+    composer.render();
     stats.update();
   });
 }
